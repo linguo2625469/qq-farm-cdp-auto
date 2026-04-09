@@ -41,3 +41,6 @@ WMPFDebugger/
 # 反编译输出与本地笔记（不提交）
 deobfuscated/
 总结.md
+
+pnpm-lock.yaml
+pnpm-workspace.yaml

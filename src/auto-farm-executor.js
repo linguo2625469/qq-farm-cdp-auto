@@ -24,6 +24,29 @@ function toErrorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function toPositiveLandId(value) {
+  const n = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function collectPlantableEmptyLandIds(status) {
+  const grids = Array.isArray(status && status.grids) ? status.grids : [];
+  const seen = new Set();
+  const landIds = [];
+
+  for (let i = 0; i < grids.length; i += 1) {
+    const grid = grids[i];
+    if (!grid || grid.stageKind !== "empty") continue;
+    if (grid.interactable === false) continue;
+    const landId = toPositiveLandId(grid.landId);
+    if (landId == null || seen.has(landId)) continue;
+    seen.add(landId);
+    landIds.push(landId);
+  }
+
+  return landIds;
+}
+
 function withSilent(opts, extra) {
   const base = opts && typeof opts === "object" ? { ...opts } : {};
   return { ...base, ...(extra && typeof extra === "object" ? extra : {}), silent: true };
@@ -124,7 +147,8 @@ async function runCurrentFarmOneClickTasks(session, callGameCtl, opts) {
 
 async function autoPlant(session, callGameCtl, mode, opts) {
   if (!mode || mode === "none") return null;
-  return await callGameCtl(session, "gameCtl.autoPlant", [withSilent({ mode: mode })]);
+  const payload = { ...(opts && typeof opts === "object" ? opts : {}), mode };
+  return await callGameCtl(session, "gameCtl.autoPlant", [withSilent(payload)]);
 }
 
 async function runOwnFarmAutomation(session, callGameCtl, opts) {
@@ -159,10 +183,40 @@ async function runOwnFarmAutomation(session, callGameCtl, opts) {
   let plantResult = null;
   if (plantMode !== "none") {
     try {
+      let plantableLandIds = null;
+      try {
+        const statusForPlant = await getFarmStatus(session, callGameCtl, {
+          includeGrids: true,
+          includeLandIds: false,
+        });
+        if (statusForPlant && statusForPlant.farmType === "own") {
+          plantableLandIds = collectPlantableEmptyLandIds(statusForPlant);
+        }
+      } catch (_) {
+        plantableLandIds = null;
+      }
+
+      if (Array.isArray(plantableLandIds) && plantableLandIds.length === 0) {
+        plantResult = {
+          ok: true,
+          action: "skip",
+          reason: "no_plantable_empty_lands",
+          emptyCount: 0,
+        };
+        return {
+          ok: true,
+          enterOwn,
+          tasks,
+          plantResult,
+        };
+      }
+
       if (actionWaitMs > 0) {
         await wait(actionWaitMs);
       }
-      plantResult = await autoPlant(session, callGameCtl, plantMode);
+      plantResult = await autoPlant(session, callGameCtl, plantMode, Array.isArray(plantableLandIds)
+        ? { emptyLandIds: plantableLandIds }
+        : null);
     } catch (error) {
       plantResult = { ok: false, error: toErrorMessage(error) };
     }

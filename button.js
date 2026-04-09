@@ -3521,7 +3521,7 @@
       const grids = Array.isArray(status.grids) ? status.grids : [];
       for (let i = 0; i < grids.length; i++) {
         const g = grids[i];
-        if (g && g.stageKind === 'empty' && g.landId != null) {
+        if (g && g.stageKind === 'empty' && g.interactable !== false && g.landId != null) {
           emptyLandIds.push(g.landId);
         }
       }

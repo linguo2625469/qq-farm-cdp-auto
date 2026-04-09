@@ -20,6 +20,16 @@ function toInt(value, defaultValue, min, max) {
   return Math.min(max, Math.max(min, fallback));
 }
 
+function normalizeAutoFarmPlantMode(value, defaultValue = "none") {
+  const raw = String(value ?? "").trim();
+  if (!raw) return defaultValue;
+  if (raw === "backpack_first") return "backpack_first";
+  if (raw === "buy_highest") return "buy_highest";
+  if (raw === "buy_lowest") return "buy_lowest";
+  if (raw === "none") return "none";
+  return defaultValue;
+}
+
 function normalizeAutoFarmConfig(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
   return {
@@ -33,6 +43,7 @@ function normalizeAutoFarmConfig(raw) {
     autoFarmRefreshFriendList: toBool(src.autoFarmRefreshFriendList, true),
     autoFarmReturnHome: toBool(src.autoFarmReturnHome, true),
     autoFarmStopOnError: toBool(src.autoFarmStopOnError, false),
+    autoFarmPlantMode: normalizeAutoFarmPlantMode(src.autoFarmPlantMode, "none"),
   };
 }
 

@@ -238,7 +238,7 @@ function collectMatureLandIds(status) {
     const landId = toPositiveNumber(grid && grid.landId);
     if (landId == null || seen.has(landId)) continue;
     if (!grid || grid.stageKind !== "mature") continue;
-    if (!(grid.canCollect || grid.canHarvest || grid.canSteal || grid.isMature)) continue;
+    if (!(grid.canCollect || grid.canHarvest || grid.canSteal)) continue;
     seen.add(landId);
     out.push(landId);
   }
@@ -280,7 +280,9 @@ async function runSupplementalMatureEffectHarvest(session, callGameCtl, opts) {
         waitForResult: rawOpts.waitForResult !== false,
         timeoutMs: rawOpts.timeoutMs,
         pollMs: rawOpts.pollMs,
-        fallbackDispatch: rawOpts.fallbackDispatch !== false,
+        // 自动化补收只处理真正存在成熟特效(星星)的地块；
+        // 没有特效时绝不再退回普通单块收获，避免对一键已收地块重复派发请求。
+        fallbackDispatch: false,
       });
       actions.push({
         ok: !!(result && result.ok),

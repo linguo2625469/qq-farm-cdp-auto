@@ -221,6 +221,108 @@ async function plantSeedsOnLands(session, callGameCtl, seedIdOrItemId, landIds, 
   ]);
 }
 
+async function clickMatureEffect(session, callGameCtl, landId, opts) {
+  return await callGameCtl(session, "gameCtl.clickMatureEffect", [
+    landId,
+    withSilent(opts),
+  ]);
+}
+
+function collectMatureLandIds(status) {
+  const grids = Array.isArray(status && status.grids) ? status.grids : [];
+  const seen = new Set();
+  const out = [];
+
+  for (let i = 0; i < grids.length; i += 1) {
+    const grid = grids[i];
+    const landId = toPositiveNumber(grid && grid.landId);
+    if (landId == null || seen.has(landId)) continue;
+    if (!grid || grid.stageKind !== "mature") continue;
+    if (!(grid.canCollect || grid.canHarvest || grid.canSteal || grid.isMature)) continue;
+    seen.add(landId);
+    out.push(landId);
+  }
+
+  return out;
+}
+
+async function runSupplementalMatureEffectHarvest(session, callGameCtl, opts) {
+  const rawOpts = opts && typeof opts === "object" ? opts : {};
+  const actionWaitMs = Math.max(0, Number(rawOpts.actionWaitMs) || 0);
+  const statusBefore = await getFarmStatus(session, callGameCtl, {
+    includeGrids: true,
+    includeLandIds: false,
+  });
+  const farmType = statusBefore && statusBefore.farmType ? statusBefore.farmType : "unknown";
+  const candidateLandIds = collectMatureLandIds(statusBefore);
+
+  if (candidateLandIds.length === 0) {
+    return {
+      ok: true,
+      completed: true,
+      farmType,
+      action: "skip",
+      candidateCount: 0,
+      candidateLandIds: [],
+      remainingCount: 0,
+      remainingLandIds: [],
+      before: summarizeFarmStatus(statusBefore),
+      after: summarizeFarmStatus(statusBefore),
+      actions: [],
+    };
+  }
+
+  const actions = [];
+  for (let i = 0; i < candidateLandIds.length; i += 1) {
+    const landId = candidateLandIds[i];
+    try {
+      const result = await clickMatureEffect(session, callGameCtl, landId, {
+        waitForResult: rawOpts.waitForResult !== false,
+        timeoutMs: rawOpts.timeoutMs,
+        pollMs: rawOpts.pollMs,
+        fallbackDispatch: rawOpts.fallbackDispatch !== false,
+      });
+      actions.push({
+        ok: !!(result && result.ok),
+        landId,
+        result,
+      });
+    } catch (error) {
+      actions.push({
+        ok: false,
+        landId,
+        error: toErrorMessage(error),
+      });
+      if (rawOpts.stopOnError) break;
+    }
+
+    if (actionWaitMs > 0 && i < candidateLandIds.length - 1) {
+      await wait(actionWaitMs);
+    }
+  }
+
+  const statusAfter = await getFarmStatus(session, callGameCtl, {
+    includeGrids: true,
+    includeLandIds: false,
+  });
+  const remainingLandIds = collectMatureLandIds(statusAfter);
+  const completed = remainingLandIds.length === 0;
+
+  return {
+    ok: completed,
+    completed,
+    farmType,
+    action: "supplemental_mature_effect_harvest",
+    candidateCount: candidateLandIds.length,
+    candidateLandIds,
+    remainingCount: remainingLandIds.length,
+    remainingLandIds,
+    before: summarizeFarmStatus(statusBefore),
+    after: summarizeFarmStatus(statusAfter),
+    actions,
+  };
+}
+
 async function getAutoPlantSeedCatalog(session, callGameCtl, opts) {
   const includeBackpack = !opts || opts.includeBackpack !== false;
   const includeShop = !opts || opts.includeShop !== false;
@@ -342,11 +444,36 @@ async function runCurrentFarmOneClickTasks(session, callGameCtl, opts) {
 
   const actions = [];
   let currentStatus = statusBefore;
+  let specialCollect = null;
 
   for (let i = 0; i < specs.length; i += 1) {
     const spec = specs[i];
     const beforeCount = getWorkCount(currentStatus, spec.key);
-    if (beforeCount <= 0) continue;
+    if (beforeCount <= 0) {
+      if (spec.key === "collect" && (!opts || opts.includeSpecialCollect !== false)) {
+        try {
+          specialCollect = await runSupplementalMatureEffectHarvest(session, callGameCtl, {
+            actionWaitMs,
+            timeoutMs: opts && opts.timeoutMs,
+            pollMs: opts && opts.pollMs,
+            stopOnError: !!(opts && opts.stopOnError),
+          });
+          if (specialCollect.candidateCount > 0) {
+            currentStatus = await getFarmStatus(session, callGameCtl, {
+              includeGrids: false,
+              includeLandIds: false,
+            });
+          }
+        } catch (error) {
+          specialCollect = {
+            ok: false,
+            error: toErrorMessage(error),
+          };
+          if (opts && opts.stopOnError) break;
+        }
+      }
+      continue;
+    }
 
     try {
       const trigger = await triggerOneClickOperation(session, callGameCtl, spec.op, {
@@ -369,6 +496,29 @@ async function runCurrentFarmOneClickTasks(session, callGameCtl, opts) {
         afterCount,
         trigger,
       });
+
+      if (spec.key === "collect" && (!opts || opts.includeSpecialCollect !== false)) {
+        try {
+          specialCollect = await runSupplementalMatureEffectHarvest(session, callGameCtl, {
+            actionWaitMs,
+            timeoutMs: opts && opts.timeoutMs,
+            pollMs: opts && opts.pollMs,
+            stopOnError: !!(opts && opts.stopOnError),
+          });
+          if (specialCollect.candidateCount > 0) {
+            currentStatus = await getFarmStatus(session, callGameCtl, {
+              includeGrids: false,
+              includeLandIds: false,
+            });
+          }
+        } catch (error) {
+          specialCollect = {
+            ok: false,
+            error: toErrorMessage(error),
+          };
+          if (opts && opts.stopOnError) break;
+        }
+      }
     } catch (error) {
       actions.push({
         ok: false,
@@ -377,6 +527,29 @@ async function runCurrentFarmOneClickTasks(session, callGameCtl, opts) {
         beforeCount,
         error: toErrorMessage(error),
       });
+
+      if (spec.key === "collect" && (!opts || opts.includeSpecialCollect !== false) && (!opts || !opts.stopOnError)) {
+        try {
+          specialCollect = await runSupplementalMatureEffectHarvest(session, callGameCtl, {
+            actionWaitMs,
+            timeoutMs: opts && opts.timeoutMs,
+            pollMs: opts && opts.pollMs,
+            stopOnError: false,
+          });
+          if (specialCollect.candidateCount > 0) {
+            currentStatus = await getFarmStatus(session, callGameCtl, {
+              includeGrids: false,
+              includeLandIds: false,
+            });
+          }
+        } catch (supplementError) {
+          specialCollect = {
+            ok: false,
+            error: toErrorMessage(supplementError),
+          };
+        }
+      }
+
       if (opts && opts.stopOnError) break;
     }
   }
@@ -386,6 +559,7 @@ async function runCurrentFarmOneClickTasks(session, callGameCtl, opts) {
     before: summarizeFarmStatus(statusBefore),
     after: summarizeFarmStatus(currentStatus),
     actions,
+    specialCollect,
   };
 }
 
@@ -555,6 +729,35 @@ async function autoPlant(session, callGameCtl, opts) {
   };
 }
 
+/**
+ * QQ 端直接调用客户端 gameCtl.autoPlant，所有逻辑在游戏上下文内完成，
+ * 避免多次 WebSocket 往返导致的超时问题。
+ */
+async function runClientAutoPlant(session, callGameCtl, opts) {
+  const plantMode = normalizeAutoPlantMode(opts && opts.autoPlantMode);
+  const plantSource = normalizeAutoPlantSource(opts && opts.autoPlantSource, opts && opts.autoPlantMode);
+  const selectedKey = readAutoPlantSelectedSeedKey(opts);
+
+  // 把 "backpack:123" / "shop:456" 格式拆出原始 ID
+  let selectedSeedId = undefined;
+  if (selectedKey) {
+    const match = selectedKey.match(/^(?:backpack|shop):(.+)$/i);
+    selectedSeedId = match ? match[1].trim() : selectedKey;
+  }
+
+  return await callGameCtl(session, "gameCtl.autoPlant", [{
+    mode: plantMode,
+    source: plantSource,
+    selectedSeedId,
+    buyWaitMs: opts && opts.buyWaitMs,
+    waitForResult: true,
+    timeoutMs: opts && opts.timeoutMs,
+    pollMs: opts && opts.pollMs,
+    intervalMs: opts && opts.intervalMs,
+    stopOnError: !!(opts && opts.stopOnError),
+  }]);
+}
+
 async function runOwnFarmAutomation(session, callGameCtl, opts) {
   const enterWaitMs = Math.max(0, Number(opts && opts.enterWaitMs) || 0);
   const actionWaitMs = Math.max(0, Number(opts && opts.actionWaitMs) || 0);
@@ -578,7 +781,10 @@ async function runOwnFarmAutomation(session, callGameCtl, opts) {
     includeWater: !opts || opts.includeWater !== false,
     includeEraseGrass: !opts || opts.includeEraseGrass !== false,
     includeKillBug: !opts || opts.includeKillBug !== false,
+    includeSpecialCollect: !opts || opts.includeSpecialCollect !== false,
     actionWaitMs: opts && opts.actionWaitMs,
+    timeoutMs: opts && opts.timeoutMs,
+    pollMs: opts && opts.pollMs,
     stopOnError: !!(opts && opts.stopOnError),
   });
 
@@ -589,17 +795,19 @@ async function runOwnFarmAutomation(session, callGameCtl, opts) {
       if (actionWaitMs > 0) {
         await wait(actionWaitMs);
       }
-      plantResult = await autoPlant(session, callGameCtl, {
-        autoPlantMode: plantMode,
-        autoPlantSource: opts && opts.autoPlantSource,
-        autoFarmPlantSelectedSeedKey: opts && opts.autoPlantSelectedSeedKey,
-        actionWaitMs: opts && opts.actionWaitMs,
-        buyWaitMs: opts && opts.buyWaitMs,
-        timeoutMs: opts && opts.timeoutMs,
-        pollMs: opts && opts.pollMs,
-        intervalMs: opts && opts.intervalMs,
-        stopOnError: !!(opts && opts.stopOnError),
-      });
+      
+        plantResult = await autoPlant(session, callGameCtl, {
+          autoPlantMode: plantMode,
+          autoPlantSource: opts && opts.autoPlantSource,
+          autoFarmPlantSelectedSeedKey: opts && opts.autoPlantSelectedSeedKey,
+          actionWaitMs: opts && opts.actionWaitMs,
+          buyWaitMs: opts && opts.buyWaitMs,
+          timeoutMs: opts && opts.timeoutMs,
+          pollMs: opts && opts.pollMs,
+          intervalMs: opts && opts.intervalMs,
+          stopOnError: !!(opts && opts.stopOnError),
+        });
+      
     } catch (error) {
       plantResult = { ok: false, error: toErrorMessage(error) };
     }
@@ -617,6 +825,7 @@ async function runFriendStealAutomation(session, callGameCtl, opts) {
   const enterWaitMs = Math.max(0, Number(opts && opts.enterWaitMs) || 0);
   const actionWaitMs = Math.max(0, Number(opts && opts.actionWaitMs) || 0);
   const maxFriends = Math.max(0, Number(opts && opts.maxFriends) || 0) || 5;
+  const includeSpecialCollect = !opts || opts.includeSpecialCollect !== false;
   const friendData = await getFriendList(session, callGameCtl, {
     refresh: !opts || opts.refresh !== false,
     sort: true,
@@ -658,13 +867,40 @@ async function runFriendStealAutomation(session, callGameCtl, opts) {
 
       const collectBefore = getWorkCount(beforeStatus, "collect");
       if (collectBefore <= 0) {
+        let specialCollect = null;
+        let finalStatus = beforeStatus;
+        if (includeSpecialCollect) {
+          try {
+            specialCollect = await runSupplementalMatureEffectHarvest(session, callGameCtl, {
+              actionWaitMs,
+              timeoutMs: opts && opts.timeoutMs,
+              pollMs: opts && opts.pollMs,
+              stopOnError: !!(opts && opts.stopOnError),
+            });
+            if (specialCollect.candidateCount > 0) {
+              finalStatus = await getFarmStatus(session, callGameCtl, {
+                includeGrids: false,
+                includeLandIds: false,
+              });
+            }
+          } catch (error) {
+            specialCollect = {
+              ok: false,
+              error: toErrorMessage(error),
+            };
+          }
+        }
+
         visits.push({
-          ok: true,
+          ok: !specialCollect || specialCollect.ok !== false,
           friend,
           enter,
-          reason: "no_collectable_after_enter",
+          reason: specialCollect && specialCollect.candidateCount > 0
+            ? "special_collect_only"
+            : "no_collectable_after_enter",
           before: summarizeFarmStatus(beforeStatus),
-          after: summarizeFarmStatus(beforeStatus),
+          after: summarizeFarmStatus(finalStatus),
+          specialCollect,
         });
         continue;
       }
@@ -680,16 +916,41 @@ async function runFriendStealAutomation(session, callGameCtl, opts) {
         includeGrids: false,
         includeLandIds: false,
       });
-      const collectAfter = getWorkCount(afterStatus, "collect");
+      let finalStatus = afterStatus;
+      let specialCollect = null;
+      if (includeSpecialCollect) {
+        try {
+          specialCollect = await runSupplementalMatureEffectHarvest(session, callGameCtl, {
+            actionWaitMs,
+            timeoutMs: opts && opts.timeoutMs,
+            pollMs: opts && opts.pollMs,
+            stopOnError: !!(opts && opts.stopOnError),
+          });
+          if (specialCollect.candidateCount > 0) {
+            finalStatus = await getFarmStatus(session, callGameCtl, {
+              includeGrids: false,
+              includeLandIds: false,
+            });
+          }
+        } catch (error) {
+          specialCollect = {
+            ok: false,
+            error: toErrorMessage(error),
+          };
+        }
+      }
+      const collectAfter = getWorkCount(finalStatus, "collect");
       visits.push({
-        ok: true,
+        ok: !specialCollect || specialCollect.ok !== false,
         friend,
         enter,
         before: summarizeFarmStatus(beforeStatus),
-        after: summarizeFarmStatus(afterStatus),
+        after: summarizeFarmStatus(finalStatus),
+        afterOneClick: summarizeFarmStatus(afterStatus),
         trigger,
         collectBefore,
         collectAfter,
+        specialCollect,
       });
     } catch (error) {
       visits.push({
@@ -760,6 +1021,8 @@ async function runAutoFarmCycle({ session, callGameCtl, options }) {
       autoPlantMode: opts.autoPlantMode || "none",
       autoPlantSource: opts.autoPlantSource || "auto",
       autoPlantSelectedSeedKey: opts.autoPlantSelectedSeedKey || "",
+      includeSpecialCollect: opts.includeSpecialCollect !== false,
+      useClientAutoPlant: !!opts.useClientAutoPlant,
       enterWaitMs: opts.enterWaitMs,
       actionWaitMs: opts.actionWaitMs,
       buyWaitMs: opts.buyWaitMs,
@@ -776,6 +1039,9 @@ async function runAutoFarmCycle({ session, callGameCtl, options }) {
       maxFriends: opts.maxFriends,
       enterWaitMs: opts.enterWaitMs,
       actionWaitMs: opts.actionWaitMs,
+      includeSpecialCollect: opts.includeSpecialCollect !== false,
+      timeoutMs: opts.timeoutMs,
+      pollMs: opts.pollMs,
       returnHome: opts.returnHome !== false,
       stopOnError: !!opts.stopOnError,
     });

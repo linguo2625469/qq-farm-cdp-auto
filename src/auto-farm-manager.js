@@ -249,6 +249,7 @@ class AutoFarmManager {
       "getSeedList",
       "getShopSeedList",
       "buyShopGoods",
+      "clickMatureEffect",
       "plantSingleLand",
       "plantSeedsOnLands",
     ]);
@@ -274,12 +275,15 @@ class AutoFarmManager {
     try {
       const session = await this.ensureSession();
       const injectState = await this.ensureGameCtlImpl(session);
+      const transportState = this.getTransportState();
+      const isQqRuntime = !!(transportState && transportState.resolvedTarget === "qq_ws");
       const cycleOpts = {
         ownFarmEnabled: due.ownDue,
         friendStealEnabled: due.friendDue,
         autoPlantMode: this.config.autoFarmPlantMode || "none",
         autoPlantSource: this.config.autoFarmPlantSource || "auto",
         autoPlantSelectedSeedKey: this.config.autoFarmPlantSelectedSeedKey || "",
+        useClientAutoPlant: isQqRuntime,
         enterWaitMs: this.config.autoFarmEnterWaitMs,
         actionWaitMs: this.config.autoFarmActionWaitMs,
         maxFriends: this.config.autoFarmMaxFriends,

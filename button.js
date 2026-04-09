@@ -1749,6 +1749,11 @@
     return entity && entity.FarmModel ? entity.FarmModel : null;
   }
 
+  function getFarmMap(opts) {
+    const entity = getFarmEntity(opts);
+    return entity && entity.FarmMap ? entity.FarmMap : null;
+  }
+
   function mapFriendListItem(friend, index) {
     const plant = friend && friend.plant && typeof friend.plant === 'object' ? friend.plant : {};
     const workCounts = {
@@ -3915,6 +3920,28 @@
     return null;
   }
 
+  function getPlantCompByLandId(landId) {
+    const targetLandId = toPositiveNumber(landId);
+    if (targetLandId == null) return null;
+
+    const farmMap = getFarmMap();
+    if (farmMap && typeof farmMap.getPlantCompByLandId === 'function') {
+      try {
+        const plantComp = farmMap.getPlantCompByLandId(targetLandId);
+        if (plantComp) return plantComp;
+      } catch (_) {}
+    }
+
+    const grid = getGridInfoByLandId(targetLandId);
+    if (grid && grid.plantNode) {
+      try {
+        return getPlantComponent(grid.plantNode);
+      } catch (_) {}
+    }
+
+    return null;
+  }
+
   async function waitForLandPlantResult(landId, opts) {
     opts = opts || {};
     const timeoutMs = opts.timeoutMs == null ? 2500 : Math.max(0, Number(opts.timeoutMs) || 0);
@@ -3948,6 +3975,51 @@
     }
   }
 
+  async function waitForLandHarvestResult(landId, before, opts) {
+    opts = opts || {};
+    const timeoutMs = opts.timeoutMs == null ? 2500 : Math.max(0, Number(opts.timeoutMs) || 0);
+    const pollMs = opts.pollMs == null ? 150 : Math.max(30, Number(opts.pollMs) || 30);
+    const startedAt = Date.now();
+    const beforeInfo = before || getGridInfoByLandId(landId);
+    let last = beforeInfo;
+    const beforeLeftFruit = beforeInfo && beforeInfo.leftFruit != null ? Number(beforeInfo.leftFruit) : null;
+    const beforeHasPlant = beforeInfo ? !!beforeInfo.hasPlant : null;
+    const beforePlantId = beforeInfo && beforeInfo.plantId != null ? Number(beforeInfo.plantId) : null;
+
+    while (true) {
+      last = getGridInfoByLandId(landId);
+      const afterLeftFruit = last && last.leftFruit != null ? Number(last.leftFruit) : null;
+      const afterPlantId = last && last.plantId != null ? Number(last.plantId) : null;
+      const changed =
+        !last
+        || !!(last && last.stageKind !== (beforeInfo && beforeInfo.stageKind))
+        || !!(last && !!last.hasPlant !== beforeHasPlant)
+        || (beforePlantId != null && afterPlantId != null && beforePlantId !== afterPlantId)
+        || (beforeLeftFruit != null && afterLeftFruit != null && beforeLeftFruit !== afterLeftFruit);
+      if (changed) {
+        return {
+          ok: true,
+          reason: 'harvested',
+          landId: toPositiveNumber(landId),
+          elapsedMs: Date.now() - startedAt,
+          after: last
+        };
+      }
+
+      if (Date.now() - startedAt >= timeoutMs) {
+        return {
+          ok: false,
+          reason: 'harvest_timeout',
+          landId: toPositiveNumber(landId),
+          elapsedMs: Date.now() - startedAt,
+          after: last
+        };
+      }
+
+      await wait(pollMs);
+    }
+  }
+
   function dispatchSingleLandPlant(seed, landId) {
     const message = getOopsMessage();
     const payload = {
@@ -3967,6 +4039,16 @@
       mutiPlantData: normalized
     };
     message.dispatchEvent('REQUEST_CREATE_NEW_MULTI_LAND_PLANT', payload);
+    return payload;
+  }
+
+  function dispatchSingleLandHarvest(landId, isAll) {
+    const message = getOopsMessage();
+    const payload = {
+      land_id: landId,
+      is_all: isAll !== false
+    };
+    message.dispatchEvent('REQUEST_HARVEST_PLANT', payload);
     return payload;
   }
 
@@ -4052,6 +4134,103 @@
       after: verify.after,
       request,
       verify
+    };
+  }
+
+  async function harvestSingleLand(landId, opts) {
+    opts = opts || {};
+    const targetLandId = toPositiveNumber(landId);
+    if (targetLandId == null) throw new Error('landId required');
+
+    const before = getGridInfoByLandId(targetLandId);
+    if (!before) {
+      return {
+        ok: false,
+        reason: 'land_not_found',
+        landId: targetLandId
+      };
+    }
+
+    if (!(before.canCollect || before.canHarvest || before.canSteal || before.stageKind === 'mature')) {
+      return {
+        ok: false,
+        reason: 'land_not_harvestable',
+        landId: targetLandId,
+        before
+      };
+    }
+
+    const request = dispatchSingleLandHarvest(targetLandId, opts.isAll !== false);
+    if (opts.waitForResult === false) {
+      return {
+        ok: true,
+        action: 'harvest_single',
+        landId: targetLandId,
+        before,
+        request,
+        dispatched: true
+      };
+    }
+
+    const verify = await waitForLandHarvestResult(targetLandId, before, opts);
+    return {
+      ok: verify.ok,
+      action: 'harvest_single',
+      landId: targetLandId,
+      before,
+      after: verify.after,
+      request,
+      verify
+    };
+  }
+
+  async function clickMatureEffect(landId, opts) {
+    opts = opts || {};
+    const targetLandId = toPositiveNumber(landId);
+    if (targetLandId == null) throw new Error('landId required');
+
+    const before = getGridInfoByLandId(targetLandId);
+    const plantComp = getPlantCompByLandId(targetLandId);
+    const effect = plantComp && (plantComp.stealEffect || plantComp.matureEffect || null);
+    if (effect && typeof effect.clickCallback === 'function') {
+      effect.clickCallback();
+      if (opts.waitForResult === false) {
+        return {
+          ok: true,
+          action: 'click_mature_effect',
+          landId: targetLandId,
+          before,
+          effectType: plantComp.stealEffect === effect ? 'stealEffect' : 'matureEffect',
+          dispatched: true
+        };
+      }
+
+      const verify = await waitForLandHarvestResult(targetLandId, before, opts);
+      return {
+        ok: verify.ok,
+        action: 'click_mature_effect',
+        landId: targetLandId,
+        before,
+        after: verify.after,
+        effectType: plantComp.stealEffect === effect ? 'stealEffect' : 'matureEffect',
+        verify
+      };
+    }
+
+    if (opts.fallbackDispatch === false) {
+      return {
+        ok: false,
+        reason: 'mature_effect_not_found',
+        landId: targetLandId,
+        before,
+        hasPlantComp: !!plantComp
+      };
+    }
+
+    const fallback = await harvestSingleLand(targetLandId, opts);
+    return {
+      ...fallback,
+      action: 'click_mature_effect_fallback_dispatch'
     };
   }
 
@@ -5108,6 +5287,7 @@
     enterFriendFarm,
     getFarmEntity,
     getFarmModel,
+    getFarmMap,
     getFarmWorkSummary,
     getFarmStatus,
     farmNodes,
@@ -5141,6 +5321,9 @@
     getShopSeedList,
     buyShopGoods,
     getSeedCatalog,
+    getPlantCompByLandId,
+    harvestSingleLand,
+    clickMatureEffect,
     plantSingleLand,
     plantSeedsOnLands,
     autoPlant,
@@ -5187,6 +5370,9 @@
       'gameCtl.getShopSeedList({ ensureData: true })',
       'gameCtl.buyShopGoods(goodsId, num, price)',
       'gameCtl.getSeedCatalog({ availableOnly: true })',
+      'gameCtl.getPlantCompByLandId(landId)',
+      'gameCtl.harvestSingleLand(landId, opts)',
+      'gameCtl.clickMatureEffect(landId, opts)',
       'gameCtl.plantSingleLand(seedId, landId, opts)',
       'gameCtl.plantSeedsOnLands(seedId, landIds, opts)',
       'gameCtl.openLandInteraction(path)',

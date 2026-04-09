@@ -15,6 +15,7 @@ const QQ_RPC_GAME_CTL_METHODS = Object.freeze([
   "getSeedList",
   "getShopSeedList",
   "buyShopGoods",
+  "clickMatureEffect",
   "plantSingleLand",
   "plantSeedsOnLands",
   "autoPlant",

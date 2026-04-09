@@ -122,8 +122,14 @@ async function runCurrentFarmOneClickTasks(session, callGameCtl, opts) {
   };
 }
 
+async function autoPlant(session, callGameCtl, mode, opts) {
+  if (!mode || mode === "none") return null;
+  return await callGameCtl(session, "gameCtl.autoPlant", [withSilent({ mode: mode })]);
+}
+
 async function runOwnFarmAutomation(session, callGameCtl, opts) {
   const enterWaitMs = Math.max(0, Number(opts && opts.enterWaitMs) || 0);
+  const actionWaitMs = Math.max(0, Number(opts && opts.actionWaitMs) || 0);
   let ownership = null;
   try {
     ownership = await getFarmOwnership(session, callGameCtl, { allowWeakUi: true });
@@ -148,10 +154,25 @@ async function runOwnFarmAutomation(session, callGameCtl, opts) {
     stopOnError: !!(opts && opts.stopOnError),
   });
 
+  // 自动种植
+  const plantMode = opts && opts.autoPlantMode ? opts.autoPlantMode : "none";
+  let plantResult = null;
+  if (plantMode !== "none") {
+    try {
+      if (actionWaitMs > 0) {
+        await wait(actionWaitMs);
+      }
+      plantResult = await autoPlant(session, callGameCtl, plantMode);
+    } catch (error) {
+      plantResult = { ok: false, error: toErrorMessage(error) };
+    }
+  }
+
   return {
     ok: true,
     enterOwn,
     tasks,
+    plantResult,
   };
 }
 
@@ -299,6 +320,7 @@ async function runAutoFarmCycle({ session, callGameCtl, options }) {
       includeWater: opts.includeWater !== false,
       includeEraseGrass: opts.includeEraseGrass !== false,
       includeKillBug: opts.includeKillBug !== false,
+      autoPlantMode: opts.autoPlantMode || "none",
       enterWaitMs: opts.enterWaitMs,
       actionWaitMs: opts.actionWaitMs,
       stopOnError: !!opts.stopOnError,

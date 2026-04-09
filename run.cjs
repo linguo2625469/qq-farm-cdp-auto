@@ -4,5 +4,13 @@
  */
 "use strict";
 
-require("./wmpf/src/index.js");
+require("./load-env.cjs").loadEnvFiles(__dirname);
+require("./apply-cli-overrides.cjs").applyCliOverrides(process.argv.slice(2));
+
+const { getConfig } = require("./src/config");
+const config = getConfig();
+
+if (config.runtimeTarget !== "qq_ws") {
+  require("./wmpf/src/index.js");
+}
 require("./src/index.js");

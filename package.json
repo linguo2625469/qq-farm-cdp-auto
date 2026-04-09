@@ -13,6 +13,8 @@
     "start": "node run.cjs",
     "start:auto": "node run.cjs --auto-farm",
     "gateway": "node src/index.js",
+    "qq:bundle": "node scripts/patch-qq-miniapp.cjs --bundle-only",
+    "qq:patch": "node scripts/patch-qq-miniapp.cjs",
     "wmpf": "node wmpf/src/index.js",
     "wmpf:auto": "node wmpf/src/index.js --auto-farm"
   },

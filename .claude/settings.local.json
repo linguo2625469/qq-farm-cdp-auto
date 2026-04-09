@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -c button.js)",
+      "Bash(node -c src/auto-farm-executor.js)",
+      "Bash(node -c src/auto-farm-manager.js)"
+    ]
+  }
+}

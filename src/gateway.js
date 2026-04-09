@@ -17,8 +17,13 @@ const { CdpSession } = require("./cdp-session");
 const { WmpfCdpSession } = require("./cdp-wmpf-session");
 const { AutoFarmManager } = require("./auto-farm-manager");
 const { PreviewManager } = require("./preview-manager");
+const { QqWsSession } = require("./qq-ws-session");
+const { ensureGameCtl, callGameCtl } = require("./game-ctl-utils");
+const { buildQqBundle, getQqBundleState, patchQqGameFile } = require("./qq-bundle");
+const { QQ_RPC_GAME_CTL_METHODS } = require("./qq-rpc-spec");
 
 const WS_PATH = "/ws";
+const REQUIRED_GAME_CTL_METHODS = [...QQ_RPC_GAME_CTL_METHODS];
 
 /** 农场功能开关默认值（与页面一致；可 POST /api/farm-config 持久化） */
 const FARM_CONFIG_DEFAULT = {
@@ -78,9 +83,16 @@ async function readJsonBody(req) {
 }
 
 /**
+ * @param {ReturnType<import('./config.js').getConfig>} config
  * @returns {{ emitter: import('node:events').EventEmitter } | null}
  */
-function tryLoadWmpfEmitter() {
+function tryLoadWmpfEmitter(config) {
+  if (config.runtimeTarget === "qq_ws") {
+    return null;
+  }
+  if (config.useWmpfCdpBridge === false) {
+    return null;
+  }
   try {
     const wmpf = require(path.join(__dirname, "..", "wmpf", "src", "index.js"));
     if (wmpf && wmpf.debugMessageEmitter) {
@@ -109,8 +121,7 @@ function createGateway(config) {
   /** @type {CdpSession | import('./cdp-wmpf-session').WmpfCdpSession | null} */
   let cdp = null;
 
-  const wmpfBridge =
-    config.useWmpfCdpBridge !== false ? tryLoadWmpfEmitter() : null;
+  const wmpfBridge = tryLoadWmpfEmitter(config);
 
   const publicRoot = path.join(__dirname, "..", "public");
   const projectRoot = path.join(__dirname, "..");
@@ -146,9 +157,95 @@ function createGateway(config) {
     return ensureCdpInFlight;
   }
 
+  const qqWsSession = new QqWsSession({
+    path: config.qqWsPath,
+    readyTimeoutMs: config.qqWsReadyTimeoutMs,
+    callTimeoutMs: config.qqWsCallTimeoutMs,
+  });
+  qqWsSession.on("clientConnected", (_snapshot, client) => {
+    console.log(`[gateway][qq_ws] client connected: id=${client.id} remote=${client.remoteAddress || "?"}`);
+  });
+  qqWsSession.on("hello", (_snapshot, client) => {
+    const hello = client && client.hello ? client.hello : {};
+    const appPlatform = hello.appPlatform || "unknown";
+    const ready = hello.gameCtlReady === true ? "ready" : "not_ready";
+    const version = hello.version || "?";
+    console.log(`[gateway][qq_ws] hello: id=${client.id} appPlatform=${appPlatform} gameCtl=${ready} version=${version}`);
+  });
+  qqWsSession.on("clientDisconnected", (_snapshot, client) => {
+    console.log(`[gateway][qq_ws] client disconnected: id=${client.id}`);
+  });
+  qqWsSession.on("clientError", (payload) => {
+    if (!payload) return;
+    console.log(`[gateway][qq_ws] client error: ${payload.error || "unknown"}`);
+  });
+
+  function getCdpSnapshot() {
+    return cdp && typeof cdp.getStatusSnapshot === "function"
+      ? cdp.getStatusSnapshot()
+      : null;
+  }
+
+  function getQqWsSnapshot() {
+    return qqWsSession.getStatusSnapshot();
+  }
+
+  function resolveAutomationRuntimeTarget() {
+    if (config.runtimeTarget === "qq_ws") return "qq_ws";
+    if (config.runtimeTarget === "auto" && qqWsSession.isReady()) return "qq_ws";
+    return "cdp";
+  }
+
+  async function ensureAutomationSession() {
+    const target = resolveAutomationRuntimeTarget();
+    if (target === "qq_ws") {
+      return await qqWsSession.connect();
+    }
+    return await ensureCdp();
+  }
+
+  function isQqRuntimeSession(session) {
+    return session === qqWsSession;
+  }
+
+  async function ensureAutomationGameCtl(session) {
+    if (isQqRuntimeSession(session)) {
+      return await qqWsSession.ensureGameCtl(REQUIRED_GAME_CTL_METHODS);
+    }
+    return await ensureGameCtl(session, projectRoot, REQUIRED_GAME_CTL_METHODS);
+  }
+
+  async function callAutomationGameCtl(session, pathName, args) {
+    if (isQqRuntimeSession(session)) {
+      return await qqWsSession.call(pathName, args);
+    }
+    return await callGameCtl(session, pathName, args);
+  }
+
+  async function callSelectedRuntimePath(pathName, args) {
+    const session = await ensureAutomationSession();
+    return await callAutomationGameCtl(session, pathName, args);
+  }
+
+  function getAutomationTransportState() {
+    return {
+      configuredTarget: config.runtimeTarget,
+      resolvedTarget: resolveAutomationRuntimeTarget(),
+      cdp: getCdpSnapshot(),
+      qqWs: getQqWsSnapshot(),
+    };
+  }
+
+  function getQqBundleSnapshot() {
+    return getQqBundleState(config);
+  }
+
   const autoFarmManager = new AutoFarmManager({
-    ensureCdp,
-    getCdp: () => cdp,
+    ensureSession: ensureAutomationSession,
+    getSession: () => (resolveAutomationRuntimeTarget() === "qq_ws" ? qqWsSession : cdp),
+    ensureGameCtl: ensureAutomationGameCtl,
+    callGameCtl: callAutomationGameCtl,
+    getTransportState: getAutomationTransportState,
     projectRoot,
   });
   const previewManager = new PreviewManager({
@@ -492,25 +589,33 @@ function createGateway(config) {
     const op = String(msg.op || "");
 
     if (op === "ping") {
-      await ensureCdp();
-      const session = cdp;
-      const { snap, timedOut } = await waitCdpSnapshotForPing(session);
+      let timedOut = false;
+      let snap = getCdpSnapshot();
+      const resolvedRuntimeTarget = resolveAutomationRuntimeTarget();
+      if (resolvedRuntimeTarget !== "qq_ws") {
+        await ensureCdp();
+        const result = await waitCdpSnapshotForPing(cdp);
+        snap = result.snap;
+        timedOut = result.timedOut;
+      }
       return {
         pong: true,
         cdpUrl: config.cdpWsUrl,
+        runtimeTarget: config.runtimeTarget,
+        resolvedRuntimeTarget,
         cdp: snap,
+        qqWs: getQqWsSnapshot(),
         preview: previewManager.getState(),
         cdpProbeTimedOut: timedOut,
       };
     }
 
-    const session = await ensureCdp();
-    const execOpts = {
-      executionContextId: config.executionContextId,
-      awaitPromise: true,
-    };
-
     if (op === "eval") {
+      const session = await ensureCdp();
+      const execOpts = {
+        executionContextId: config.executionContextId,
+        awaitPromise: true,
+      };
       const code = String(msg.code ?? "");
       const expr = wrapEvalExpression(code);
       const value = await session.evaluate(expr, execOpts);
@@ -520,12 +625,27 @@ function createGateway(config) {
     if (op === "call") {
       const p = String(msg.path ?? "");
       const args = Array.isArray(msg.args) ? msg.args : [];
+      if (resolveAutomationRuntimeTarget() === "qq_ws") {
+        return await callSelectedRuntimePath(p, args);
+      }
+      const session = await ensureCdp();
+      const execOpts = {
+        executionContextId: config.executionContextId,
+        awaitPromise: true,
+      };
       const expr = wrapCallExpression(p, args);
-      const value = await session.evaluate(expr, execOpts);
-      return value;
+      return await session.evaluate(expr, execOpts);
     }
 
     if (op === "injectFile") {
+      if (resolveAutomationRuntimeTarget() === "qq_ws") {
+        throw new Error("injectFile not supported on qq_ws runtime");
+      }
+      const session = await ensureCdp();
+      const execOpts = {
+        executionContextId: config.executionContextId,
+        awaitPromise: true,
+      };
       const rel = String(msg.path ?? "");
       if (!rel) throw new Error("injectFile.path required");
       const base = path.join(__dirname, "..");
@@ -555,6 +675,8 @@ function createGateway(config) {
     if (op === "previewCapture") {
       return await previewManager.capture(msg.options);
     }
+
+    const session = await ensureCdp();
 
     if (op === "previewTap") {
       const x = Number(msg.x);
@@ -684,23 +806,24 @@ function createGateway(config) {
     const urlPath = req.url.split("?")[0];
 
     if (req.method === "GET" && urlPath === "/api/health") {
-      if (!cdp) {
+      if (!cdp && resolveAutomationRuntimeTarget() !== "qq_ws") {
         setImmediate(() => {
           ensureCdp().catch(() => {});
         });
       }
-      const cdpSnap =
-        cdp && typeof cdp.getStatusSnapshot === "function"
-          ? cdp.getStatusSnapshot()
-          : null;
       const payload = {
         ok: true,
         uptimeSec: Math.floor(process.uptime()),
         gateway: {
           cdpWsUrl: config.cdpWsUrl,
           wmpfBridge: !!wmpfBridge,
+          runtimeTarget: config.runtimeTarget,
+          resolvedRuntimeTarget: resolveAutomationRuntimeTarget(),
+          qqWsPath: config.qqWsPath,
         },
-        cdp: cdpSnap,
+        cdp: getCdpSnapshot(),
+        qqWs: getQqWsSnapshot(),
+        qqBundle: getQqBundleSnapshot(),
         autoFarm: autoFarmManager.getState(),
         preview: previewManager.getState(),
         cdpSessionInitialized: cdp != null,
@@ -709,6 +832,63 @@ function createGateway(config) {
       };
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
       res.end(JSON.stringify(payload));
+      return;
+    }
+
+    if (req.method === "GET" && urlPath === "/api/qq-bundle") {
+      try {
+        const built = buildQqBundle({
+          config,
+          projectRoot,
+        });
+        const asRaw = req.url.includes("raw=1");
+        const asDownload = req.url.includes("download=1");
+        if (asRaw || asDownload) {
+          const filename = built.meta.defaultFilename || "qq-miniapp-bootstrap.js";
+          res.writeHead(200, {
+            "Content-Type": "text/javascript; charset=utf-8",
+            "Content-Disposition": `${asDownload ? "attachment" : "inline"}; filename="${filename}"`,
+          });
+          res.end(built.bundleText);
+          return;
+        }
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, data: built.meta }));
+      } catch (e) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+      return;
+    }
+
+    if (req.method === "POST" && urlPath === "/api/qq-bundle/patch") {
+      try {
+        const parsed = await readJsonBody(req);
+        const targetPath = String(parsed.targetPath || config.qqGameJsPath || "").trim();
+        if (!targetPath) {
+          throw new Error("未配置 QQ game.js 路径，请先设置 FARM_QQ_GAME_JS");
+        }
+        const built = buildQqBundle({
+          config,
+          projectRoot,
+        });
+        const patch = patchQqGameFile(targetPath, built.bundleText, {
+          noBackup: !!parsed.noBackup,
+        });
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({
+          ok: true,
+          data: {
+            meta: built.meta,
+            patch,
+          },
+        }));
+      } catch (e) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
       return;
     }
 
@@ -830,9 +1010,23 @@ function createGateway(config) {
     }
   });
 
-  const wss = new WebSocket.Server({
-    server: httpServer,
-    path: WS_PATH,
+  qqWsSession.attach();
+
+  const wss = new WebSocket.Server({ noServer: true });
+
+  httpServer.on("upgrade", (req, socket, head) => {
+    const urlPath = req && req.url ? req.url.split("?")[0] : "";
+    if (urlPath === WS_PATH) {
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        wss.emit("connection", ws, req);
+      });
+      return;
+    }
+    if (urlPath === config.qqWsPath) {
+      qqWsSession.handleUpgrade(req, socket, head);
+      return;
+    }
+    socket.destroy();
   });
 
   wss.on("connection", (socket) => {
@@ -896,12 +1090,14 @@ function createGateway(config) {
       if (wmpfBridge) {
         wmpfBridge.emitter.off("miniappconnected", kickEnsureCdpOnTransport);
       }
+      qqWsSession.close();
       wss.close();
       httpServer.close();
       if (cdp) cdp.close();
       cdp = null;
     },
     getCdp: () => cdp,
+    getQqWsSession: () => qqWsSession,
   };
 }
 

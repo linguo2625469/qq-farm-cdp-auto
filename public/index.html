@@ -509,6 +509,14 @@
       transform: translateY(-1px);
     }
 
+    button.action:disabled,
+    button.ghost:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
     button.action {
       color: #fefcf7;
       background: linear-gradient(135deg, var(--accent), var(--accent-strong));
@@ -747,33 +755,107 @@
         </div>
       </div>
       <div class="status-chip">
-        <span class="chip-label">WebSocket</span>
+        <span class="chip-label">控制通道</span>
         <div class="chip-value">
           <span class="dot" id="dotWs"></span>
           <span id="txtWs">未连接</span>
         </div>
       </div>
       <div class="status-chip">
-        <span class="chip-label">上下文</span>
+        <span class="chip-label">运行时</span>
         <div class="chip-value">
-          <span class="dot" id="dotContext"></span>
-          <span id="stContext">等待探测</span>
+          <span class="dot" id="dotRuntime"></span>
+          <span id="txtRuntime">等待健康状态</span>
         </div>
       </div>
       <div class="status-chip">
-        <span class="chip-label">注入</span>
+        <span class="chip-label">游戏端</span>
         <div class="chip-value">
-          <span class="dot" id="dotInject"></span>
-          <span id="stInject">等待上下文就绪</span>
+          <span class="dot" id="dotGameSide"></span>
+          <span id="txtGameSide">等待健康状态</span>
         </div>
       </div>
     </section>
 
     <nav class="tabbar" role="tablist">
       <button type="button" class="tab-btn on" data-tab="automation" role="tab">自动农场</button>
+      <button type="button" class="tab-btn" data-tab="runtime" role="tab">运行时</button>
+      <button type="button" class="tab-btn" data-tab="preview" role="tab">画面预览</button>
       <button type="button" class="tab-btn" data-tab="friends" role="tab">好友农场</button>
       <button type="button" class="tab-btn" data-tab="logs" role="tab">消息日志</button>
     </nav>
+
+    <section class="panel" id="panel-runtime" data-tab="runtime">
+      <div class="panel-grid friend-grid">
+        <article class="card span-full">
+          <div class="card-head">
+            <div>
+              <h2>运行时总览</h2>
+              <p class="hint">这里区分当前到底是走微信 CDP 还是 QQ WebSocket 宿主，以及各自的就绪状态。</p>
+            </div>
+            <button type="button" class="ghost" id="btnRuntimeRefresh">立即刷新</button>
+          </div>
+          <p class="summary-note" id="txtRuntimeSummary">等待健康状态</p>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h2>QQ 宿主</h2>
+              <p class="hint">显示 QQ 小程序宿主连接、平台、脚本版本；也可以直接在这里导出 bundle 或一键打补丁。</p>
+            </div>
+          </div>
+          <p class="summary-note" id="txtQqHostState">未连接</p>
+          <p class="summary-note" id="txtQqBundleState">等待 bundle 配置</p>
+          <div class="action-row">
+            <button type="button" class="action secondary" id="btnSaveQqBundle">保存 QQ Bundle</button>
+            <button type="button" class="action" id="btnPatchQqGame">一键打补丁</button>
+          </div>
+          <pre class="log side" id="logQqHost"></pre>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h2>CDP / 注入</h2>
+              <p class="hint">CDP 上下文和 `button.js` 自动注入只在微信调试链路下生效。</p>
+            </div>
+          </div>
+          <p class="summary-note" id="txtCdpState">等待 CDP 状态</p>
+          <p class="summary-note" id="txtInjectState">等待脚本状态</p>
+          <p class="summary-note" id="txtRuntimeNotes">QQ WS 模式不需要注入；画面预览仍然只在 CDP 路线可用。</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-preview" data-tab="preview">
+      <div class="panel-grid preview-grid">
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h2>画面预览</h2>
+              <p class="hint">CDP 模式下可直接点击、按住和拖动；QQ WS 模式当前不提供实时画面。</p>
+            </div>
+            <button type="button" class="ghost" id="btnPreviewRefresh">刷新状态</button>
+          </div>
+          <p class="summary-note" id="txtPreviewState">等待预览状态</p>
+          <div class="preview-stage interactive">
+            <img id="imgPreviewMini" alt="游戏画面" style="display:none" />
+            <div class="preview-empty" id="previewEmptyMini">等待预览...</div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h2>预览能力</h2>
+              <p class="hint">预览能力由当前运行时决定，不会强行把 QQ 路线伪装成 CDP。</p>
+            </div>
+          </div>
+          <p class="summary-note" id="txtPreviewCapability">等待运行时状态</p>
+        </article>
+      </div>
+    </section>
 
     <section class="panel" id="panel-friends" data-tab="friends">
       <div class="panel-grid friend-grid">
@@ -840,7 +922,7 @@
 
     <section class="panel on" id="panel-automation" data-tab="automation">
       <div class="panel-grid auto-grid">
-        <article class="card">
+        <article class="card span-full">
           <div class="card-head">
             <div>
               <h2>自动农场</h2>
@@ -886,6 +968,16 @@
             </label>
           </div>
 
+          <label class="field-block" style="margin-bottom:12px">
+            <span>空地自动种植</span>
+            <select id="autoPlantMode">
+              <option value="none">不种植</option>
+              <option value="backpack_first">使用背包已有种子</option>
+              <option value="buy_highest">购买等级最高的种子</option>
+              <option value="buy_lowest">购买等级最低的种子</option>
+            </select>
+          </label>
+
           <div class="input-grid">
             <label class="field-block">
               <span>自己间隔(秒)</span>
@@ -914,14 +1006,6 @@
             <button type="button" class="action" id="btnAutoRunOnce">立即执行一轮</button>
             <button type="button" class="action" id="btnAutoStart">开始自动化</button>
             <button type="button" class="action secondary" id="btnAutoStop">停止自动化</button>
-          </div>
-        </article>
-
-        <article class="card" style="padding:12px">
-          <h2 style="margin-bottom:8px">画面预览</h2>
-          <div class="preview-stage mini interactive">
-            <img id="imgPreviewMini" alt="游戏画面" style="display:none" />
-            <div class="preview-empty" id="previewEmptyMini">等待预览...</div>
           </div>
         </article>
       </div>
@@ -965,16 +1049,24 @@
       const txtWs = document.getElementById("txtWs");
       const dotHttp = document.getElementById("dotHttp");
       const txtHttp = document.getElementById("txtHttp");
-      const dotContext = document.getElementById("dotContext");
-      const stContext = document.getElementById("stContext");
-      const dotInject = document.getElementById("dotInject");
-      const stInject = document.getElementById("stInject");
+      const dotRuntime = document.getElementById("dotRuntime");
+      const txtRuntime = document.getElementById("txtRuntime");
+      const dotGameSide = document.getElementById("dotGameSide");
+      const txtGameSide = document.getElementById("txtGameSide");
       const selFriend = document.getElementById("selFriend");
       const iptFriendTarget = document.getElementById("iptFriendTarget");
       const txtFriendSummary = document.getElementById("txtFriendSummary");
       const txtAutoFarmState = document.getElementById("txtAutoFarmState");
       const logAutoFarm = document.getElementById("logAutoFarm");
-      const txtPreviewState = null;
+      const txtRuntimeSummary = document.getElementById("txtRuntimeSummary");
+      const txtQqHostState = document.getElementById("txtQqHostState");
+      const txtQqBundleState = document.getElementById("txtQqBundleState");
+      const logQqHost = document.getElementById("logQqHost");
+      const txtCdpState = document.getElementById("txtCdpState");
+      const txtInjectState = document.getElementById("txtInjectState");
+      const txtRuntimeNotes = document.getElementById("txtRuntimeNotes");
+      const txtPreviewState = document.getElementById("txtPreviewState");
+      const txtPreviewCapability = document.getElementById("txtPreviewCapability");
       const imgPreview = document.getElementById("imgPreviewMini");
       const previewEmpty = document.getElementById("previewEmptyMini");
       const previewStage = imgPreview ? imgPreview.closest(".preview-stage") : null;
@@ -988,6 +1080,7 @@
       const autoEnterWaitMs = document.getElementById("autoEnterWaitMs");
       const autoActionWaitMs = document.getElementById("autoActionWaitMs");
       const autoStopOnError = document.getElementById("autoStopOnError");
+      const autoPlantMode = document.getElementById("autoPlantMode");
 
       let ws = null;
       let reqId = 0;
@@ -1026,6 +1119,39 @@
         return date.toLocaleString("zh-CN", { hour12: false });
       }
 
+      function formatRuntimeTargetLabel(target) {
+        if (target === "qq_ws") return "QQ WS";
+        if (target === "cdp") return "微信 CDP";
+        if (target === "auto") return "自动选择";
+        return target ? String(target) : "未知";
+      }
+
+      function getGatewayState(payload) {
+        return payload && payload.gateway && typeof payload.gateway === "object" ? payload.gateway : {};
+      }
+
+      function getConfiguredRuntimeTarget(payload) {
+        const gateway = getGatewayState(payload);
+        return gateway.runtimeTarget || "unknown";
+      }
+
+      function getResolvedRuntimeTarget(payload) {
+        const gateway = getGatewayState(payload);
+        return gateway.resolvedRuntimeTarget || getConfiguredRuntimeTarget(payload);
+      }
+
+      function isQqRuntimeResolved(payload) {
+        return getResolvedRuntimeTarget(payload) === "qq_ws";
+      }
+
+      function isPreviewSupported(payload) {
+        return getConfiguredRuntimeTarget(payload) !== "qq_ws";
+      }
+
+      function getQqBundleState(payload) {
+        return payload && payload.qqBundle && typeof payload.qqBundle === "object" ? payload.qqBundle : null;
+      }
+
       function appendLine(msg, obj, isDebug) {
         if (isDebug && !debugMode) return;
         const entry = document.createElement("div");
@@ -1061,6 +1187,39 @@
           logEl.removeChild(logEl.firstChild);
         }
         logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      async function saveTextWithDialog(filename, text, mimeType) {
+        const safeName = filename || "qq-miniapp-bootstrap.js";
+        const type = mimeType || "text/javascript";
+        if (window.showSaveFilePicker) {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: safeName,
+            types: [{
+              description: "JavaScript",
+              accept: {
+                [type]: [".js"],
+              },
+            }],
+          });
+          const writable = await handle.createWritable();
+          await writable.write(text);
+          await writable.close();
+          return "picker";
+        }
+
+        const blob = new Blob([text], { type: type + ";charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = safeName;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(function () {
+          URL.revokeObjectURL(url);
+        }, 1000);
+        return "download";
       }
 
       function setDotState(el, state) {
@@ -1221,6 +1380,7 @@
         autoEnterWaitMs.value = cfg.autoFarmEnterWaitMs != null ? cfg.autoFarmEnterWaitMs : 1800;
         autoActionWaitMs.value = cfg.autoFarmActionWaitMs != null ? cfg.autoFarmActionWaitMs : 1200;
         autoStopOnError.checked = !!cfg.autoFarmStopOnError;
+        autoPlantMode.value = cfg.autoFarmPlantMode || "none";
       }
 
       function gatherAutoFarmConfig() {
@@ -1235,6 +1395,7 @@
           autoFarmEnterWaitMs: Number(autoEnterWaitMs.value || 1800),
           autoFarmActionWaitMs: Number(autoActionWaitMs.value || 1200),
           autoFarmStopOnError: !!autoStopOnError.checked,
+          autoFarmPlantMode: autoPlantMode.value || "none",
         };
       }
 
@@ -1338,6 +1499,20 @@
             });
           }
 
+          // 自动种植
+          var pr = own && own.plantResult;
+          if (pr) {
+            if (pr.ok && pr.action === 'planted') {
+              lines.push(ts + "自动种植：" + (pr.seedName || pr.seedId) + " x" + (pr.emptyCount || 0) + " (" + (pr.seedSource || pr.mode) + ")");
+            } else if (pr.ok && pr.action === 'no_empty_lands') {
+              lines.push(ts + "自动种植：无空地");
+            } else if (pr.ok && pr.action === 'skip') {
+              // 不显示
+            } else if (!pr.ok) {
+              lines.push(ts + "自动种植：失败 " + (pr.reason || pr.error || ""));
+            }
+          }
+
           // 好友农场
           var fs = result.friendSteal;
           if (fs) {
@@ -1395,6 +1570,9 @@
 
         const parts = [];
         parts.push(state.running ? "运行中" : "已停止");
+        if (state.runtime && state.runtime.resolvedTarget) {
+          parts.push("路线: " + formatRuntimeTargetLabel(state.runtime.resolvedTarget));
+        }
         if (state.busy) parts.push("执行中");
         if (state.nextRunAt) parts.push("下次: " + formatDateTime(state.nextRunAt));
         if (state.lastFinishedAt) parts.push("上次完成: " + formatDateTime(state.lastFinishedAt));
@@ -1504,8 +1682,18 @@
         if (state && state.lastFrameMeta) {
           lastPreviewFrameMeta = state.lastFrameMeta;
         }
+        if (!isPreviewSupported(lastHealth)) {
+          if (txtPreviewState) {
+            txtPreviewState.textContent = "当前运行时不提供预览";
+          }
+          return;
+        }
         if (!state) {
-          if (txtPreviewState) txtPreviewState.textContent = "未加载预览状态";
+          if (txtPreviewState) {
+            txtPreviewState.textContent = isPreviewSupported(lastHealth)
+              ? "未加载预览状态"
+              : "当前运行时不提供预览";
+          }
           return;
         }
         const parts = [];
@@ -1756,6 +1944,118 @@
         txtWs.textContent = ok ? "已连接 " + wsUrl() : "未连接";
       }
 
+      function formatQqHistoryEntry(entry) {
+        if (!entry || typeof entry !== "object") return "";
+        const prefix = entry.time ? "[" + formatDateTime(entry.time) + "] " : "";
+        if (entry.kind === "connect") {
+          return prefix + "宿主已连接";
+        }
+        if (entry.kind === "disconnect") {
+          return prefix + "宿主已断开";
+        }
+        if (entry.kind === "hello") {
+          const payload = entry.payload || {};
+          return prefix + "hello " + [
+            payload.appPlatform || "unknown",
+            payload.ready ? "ready" : "not_ready",
+            payload.version || "?",
+          ].join(" · ");
+        }
+        if (entry.kind === "event") {
+          const payload = entry.payload || {};
+          if (payload.name === "gameCtlReadyChanged") {
+            return prefix + "gameCtlReady -> " + (payload.ready ? "ready" : "not_ready");
+          }
+          return prefix + "event " + (payload.name || "unknown");
+        }
+        if (entry.kind === "log") {
+          const payload = entry.payload || {};
+          return prefix + "[" + (payload.level || "info") + "] " + (payload.message || "");
+        }
+        if (entry.kind === "socketError" || entry.kind === "clientError") {
+          const payload = entry.payload || {};
+          return prefix + "错误: " + (payload.error || "unknown");
+        }
+        return prefix + (entry.kind || "unknown");
+      }
+
+      function renderRuntimeChip(payload) {
+        if (!payload) {
+          setDotState(dotRuntime, "warn");
+          txtRuntime.textContent = "等待健康状态";
+          return;
+        }
+        const configured = getConfiguredRuntimeTarget(payload);
+        const resolved = getResolvedRuntimeTarget(payload);
+        const parts = [
+          "配置 " + formatRuntimeTargetLabel(configured),
+          "当前 " + formatRuntimeTargetLabel(resolved),
+        ];
+        let state = "warn";
+        if (resolved === "qq_ws") {
+          state = payload.qqWs && payload.qqWs.ready ? "ok" : (payload.qqWs && payload.qqWs.connected ? "warn" : "bad");
+        } else if (payload.cdp && payload.cdp.contextReady) {
+          state = "ok";
+        } else if (payload.cdp && payload.cdp.prepareError) {
+          state = "bad";
+        }
+        setDotState(dotRuntime, state);
+        txtRuntime.textContent = parts.join(" · ");
+      }
+
+      function renderGameSideChip(payload) {
+        if (!payload) {
+          setDotState(dotGameSide, "warn");
+          txtGameSide.textContent = "等待健康状态";
+          return;
+        }
+        if (isQqRuntimeResolved(payload)) {
+          const qqWs = payload.qqWs || {};
+          const active = Array.isArray(qqWs.clients)
+            ? qqWs.clients.find(function (item) { return item.id === qqWs.activeClientId; }) || qqWs.clients[0]
+            : null;
+          let state = "bad";
+          let text = "QQ 宿主未连接";
+          if (qqWs.connected && qqWs.ready && active) {
+            state = "ok";
+            text = "QQ 宿主就绪 · " + (active.appPlatform || "unknown");
+          } else if (qqWs.connected) {
+            state = "warn";
+            text = "QQ 宿主已连接，等待 gameCtl";
+          }
+          setDotState(dotGameSide, state);
+          txtGameSide.textContent = text;
+          return;
+        }
+
+        const cdp = payload.cdp || null;
+        if (!payload.cdpSessionInitialized) {
+          setDotState(dotGameSide, "warn");
+          txtGameSide.textContent = "等待首个 CDP 会话";
+          return;
+        }
+        if (!cdp) {
+          setDotState(dotGameSide, "warn");
+          txtGameSide.textContent = "CDP 会话初始化中";
+          return;
+        }
+        const parts = [];
+        if (cdp.contextReady) parts.push("上下文就绪");
+        else parts.push("等待上下文");
+        if (cdp.executionContextId != null) parts.push("ctx=" + cdp.executionContextId);
+        let state = "warn";
+        if (cdp.prepareError) {
+          state = "bad";
+          parts.push("错误: " + cdp.prepareError);
+        } else if (cdp.contextReady) {
+          state = "ok";
+        } else if (cdp.transportConnected === false) {
+          state = "bad";
+        }
+        setDotState(dotGameSide, state);
+        txtGameSide.textContent = parts.join(" · ");
+      }
+
       function getContextKey(cdp) {
         if (!cdp) return "";
         if (cdp.executionContextId != null) return "ctx:" + cdp.executionContextId;
@@ -1768,29 +2068,23 @@
       }
 
       function renderInjectStatus() {
-        let state = "warn";
         let text = "等待上下文就绪";
-        if (autoInject.inFlight) {
-          state = "warn";
+        if (lastHealth && getConfiguredRuntimeTarget(lastHealth) === "qq_ws") {
+          text = "QQ WS 模式无需 CDP 注入，button.js 由补丁 bundle 常驻加载";
+        } else if (autoInject.inFlight) {
           text = "正在自动注入 " + autoInject.path;
         } else if (autoInject.injected) {
-          state = "ok";
           text = autoInject.lastOkAt ? "已自动注入 · " + formatClock(autoInject.lastOkAt) : "已自动注入";
         } else if (autoInject.lastError) {
-          state = "bad";
           text = "注入失败 · " + autoInject.lastError;
         } else if (!lastHealth || !lastHealth.cdp || !lastHealth.cdp.contextReady) {
-          state = "warn";
           text = "等待上下文就绪";
         } else if (!ws || ws.readyState !== WebSocket.OPEN) {
-          state = "warn";
-          text = "等待 WebSocket";
+          text = "等待浏览器 WebSocket";
         } else if (autoInject.attemptedContextKey && autoInject.attemptedContextKey === autoInject.contextKey) {
-          state = "warn";
           text = "当前上下文已尝试注入";
         }
-        setDotState(dotInject, state);
-        stInject.textContent = text;
+        txtInjectState.textContent = text;
       }
 
       function resetAutoInjectForNextContext() {
@@ -1804,6 +2098,12 @@
 
       function maybeAutoInjectFromHealth(payload) {
         lastHealth = payload || null;
+        if (!payload || !isPreviewSupported(payload)) {
+          resetAutoInjectForNextContext();
+          renderInjectStatus();
+          return;
+        }
+
         const cdp = payload && payload.cdp ? payload.cdp : null;
         if (!(cdp && cdp.contextReady)) {
           if (autoInject.contextKey || autoInject.injected || autoInject.inFlight) {
@@ -1839,34 +2139,143 @@
         }
       }
 
-      function renderContextStatus(snapshot, payload) {
-        const c = snapshot || null;
-        if (!payload || !payload.cdpSessionInitialized) {
-          setDotState(dotContext, "warn");
-          stContext.textContent = "等待首个 WebSocket 指令建立 CDP 会话";
+      function renderRuntimePanel(payload) {
+        if (!payload) {
+          txtRuntimeSummary.textContent = "健康检查失败，等待下次轮询";
+          txtQqHostState.textContent = "未连接";
+          txtQqBundleState.textContent = "无法读取 bundle 配置";
+          const btnPatch0 = document.getElementById("btnPatchQqGame");
+          if (btnPatch0) btnPatch0.disabled = true;
+          logQqHost.textContent = "暂无宿主日志";
+          txtCdpState.textContent = "等待 CDP 状态";
+          txtRuntimeNotes.textContent = "等待运行时状态";
+          renderInjectStatus();
           return;
         }
-        if (!c) {
-          setDotState(dotContext, "warn");
-          stContext.textContent = "CDP 会话初始化中";
-          return;
-        }
-        const parts = [];
-        if (c.mode) parts.push(c.mode);
-        if (c.transportConnected === true) parts.push("调试桥已连接");
-        else if (c.transportConnected === false) parts.push("调试桥未连接");
-        if (c.contextReady) parts.push("上下文就绪");
-        else parts.push("等待上下文");
-        if (c.executionContextId != null) parts.push("ctx=" + c.executionContextId);
-        if (c.prepareState) parts.push("状态=" + c.prepareState);
-        if (c.prepareError) parts.push("错误: " + c.prepareError);
 
-        let state = "warn";
-        if (c.prepareError) state = "bad";
-        else if (c.contextReady) state = "ok";
-        else if (c.transportConnected === false) state = "bad";
-        setDotState(dotContext, state);
-        stContext.textContent = parts.length ? parts.join(" · ") : "等待上下文";
+        const qqWs = payload.qqWs || {};
+        const active = Array.isArray(qqWs.clients)
+          ? qqWs.clients.find(function (item) { return item.id === qqWs.activeClientId; }) || qqWs.clients[0]
+          : null;
+        const runtimeSummary = [
+          "配置 " + formatRuntimeTargetLabel(getConfiguredRuntimeTarget(payload)),
+          "当前 " + formatRuntimeTargetLabel(getResolvedRuntimeTarget(payload)),
+          qqWs.connected ? ("QQ 宿主 " + (qqWs.ready ? "ready" : "connected")) : "QQ 宿主未连接",
+        ];
+        if (payload.cdp && payload.cdp.contextReady) {
+          runtimeSummary.push("CDP 上下文就绪");
+        } else if (payload.cdp && payload.cdp.prepareError) {
+          runtimeSummary.push("CDP 错误");
+        }
+        txtRuntimeSummary.textContent = runtimeSummary.join(" · ");
+
+        if (active) {
+          const qqParts = [
+            qqWs.ready ? "宿主已就绪" : "宿主已连接",
+            active.appPlatform || "unknown",
+          ];
+          if (active.version) qqParts.push(active.version);
+          if (active.scriptHash) qqParts.push("hash=" + active.scriptHash);
+          if (Array.isArray(active.availableMethods) && active.availableMethods.length > 0) {
+            qqParts.push("rpc=" + active.availableMethods.length);
+          }
+          txtQqHostState.textContent = qqParts.join(" · ");
+        } else {
+          txtQqHostState.textContent = qqWs.connected ? "宿主已连接，等待 hello" : "未连接到 QQ 宿主";
+        }
+
+        const qqLines = Array.isArray(qqWs.recentMessages)
+          ? qqWs.recentMessages.slice(-18).reverse().map(formatQqHistoryEntry).filter(Boolean)
+          : [];
+        logQqHost.textContent = qqLines.length ? qqLines.join("\n") : "暂无宿主日志";
+
+        const bundle = getQqBundleState(payload);
+        if (bundle) {
+          const bundleParts = [
+            "文件 " + (bundle.defaultFilename || "qq-miniapp-bootstrap.js"),
+            "ws " + (bundle.hostWsUrl || "未设置"),
+            "版本 " + (bundle.hostVersion || "qq-host-1"),
+          ];
+          if (bundle.targetConfigured && bundle.targetPath) {
+            bundleParts.push("可直接补丁");
+          } else {
+            bundleParts.push("未配置目标 game.js");
+          }
+          txtQqBundleState.textContent = bundleParts.join(" · ");
+        } else {
+          txtQqBundleState.textContent = "等待 bundle 配置";
+        }
+
+        const btnPatch = document.getElementById("btnPatchQqGame");
+        if (btnPatch) {
+          btnPatch.disabled = !(bundle && bundle.targetConfigured);
+          btnPatch.title = btnPatch.disabled ? "先配置 FARM_QQ_GAME_JS，再使用一键打补丁" : "";
+        }
+
+        const cdp = payload.cdp || null;
+        if (!isPreviewSupported(payload)) {
+          txtCdpState.textContent = "当前配置为 QQ WS，CDP 不参与自动化主链路";
+        } else if (!payload.cdpSessionInitialized) {
+          txtCdpState.textContent = "等待首个 CDP 会话建立";
+        } else if (!cdp) {
+          txtCdpState.textContent = "CDP 会话初始化中";
+        } else {
+          const cdpParts = [];
+          if (cdp.mode) cdpParts.push(cdp.mode);
+          if (cdp.transportConnected === true) cdpParts.push("调试桥已连接");
+          else if (cdp.transportConnected === false) cdpParts.push("调试桥未连接");
+          if (cdp.contextReady) cdpParts.push("上下文就绪");
+          else cdpParts.push("等待上下文");
+          if (cdp.executionContextId != null) cdpParts.push("ctx=" + cdp.executionContextId);
+          if (cdp.prepareError) cdpParts.push("错误: " + cdp.prepareError);
+          txtCdpState.textContent = cdpParts.join(" · ");
+        }
+
+        txtRuntimeNotes.textContent = isQqRuntimeResolved(payload)
+          ? "当前自动化主链路已经切到 QQ 宿主；button.js 由补丁 bundle 常驻加载。"
+          : "当前自动化主链路使用 CDP；小游戏上下文重建后页面会自动补注 button.js。";
+        renderInjectStatus();
+      }
+
+      function renderPreviewCapability(payload) {
+        if (!payload) {
+          if (txtPreviewCapability) txtPreviewCapability.textContent = "等待运行时状态";
+          return;
+        }
+
+        if (!isPreviewSupported(payload)) {
+          if (txtPreviewCapability) {
+            txtPreviewCapability.textContent = "当前配置为 QQ WS，网关不会建立 CDP 画面预览。";
+          }
+          if (txtPreviewState) {
+            txtPreviewState.textContent = "QQ WS 模式下不提供实时预览";
+          }
+          if (previewStage) {
+            previewStage.classList.remove("interactive");
+          }
+          if (imgPreview) {
+            imgPreview.style.display = "none";
+            imgPreview.removeAttribute("src");
+          }
+          if (previewEmpty) {
+            previewEmpty.style.display = "block";
+            previewEmpty.textContent = "QQ WS 模式下暂无画面预览";
+          }
+          return;
+        }
+
+        if (previewStage) {
+          previewStage.classList.add("interactive");
+        }
+        const cdp = payload.cdp || null;
+        if (txtPreviewCapability) {
+          txtPreviewCapability.textContent = cdp && cdp.contextReady
+            ? "当前可以使用预览与点击/拖动输入。"
+            : "预览仍走 CDP 调试桥，需等待小游戏上下文就绪。";
+        }
+        if (previewEmpty && !imgPreview.src) {
+          previewEmpty.textContent = "等待预览...";
+        }
       }
 
       function fetchHealth() {
@@ -1879,7 +2288,10 @@
             lastHealth = j;
             setDotState(dotHttp, "ok");
             txtHttp.textContent = "运行中 · " + j.uptimeSec + "s";
-            renderContextStatus(j.cdp, j);
+            renderRuntimeChip(j);
+            renderGameSideChip(j);
+            renderRuntimePanel(j);
+            renderPreviewCapability(j);
             renderPreviewState(j.preview || null, false);
             maybeAutoInjectFromHealth(j);
           })
@@ -1887,8 +2299,12 @@
             lastHealth = null;
             setDotState(dotHttp, "bad");
             txtHttp.textContent = "无法访问 /api/health";
-            setDotState(dotContext, "bad");
-            stContext.textContent = "健康检查失败";
+            setDotState(dotRuntime, "bad");
+            txtRuntime.textContent = "健康检查失败";
+            setDotState(dotGameSide, "bad");
+            txtGameSide.textContent = "健康检查失败";
+            renderRuntimePanel(null);
+            renderPreviewCapability(null);
             renderInjectStatus();
           });
       }
@@ -1913,7 +2329,7 @@
             autoInject.injected = true;
             autoInject.lastError = "";
             autoInject.lastOkAt = new Date().toISOString();
-            if (!previewState || !previewState.running) {
+            if (isPreviewSupported(lastHealth) && (!previewState || !previewState.running)) {
               send({ op: "previewStart", options: gatherPreviewOptions() }, "previewStart");
             }
           }
@@ -2004,10 +2420,10 @@
         ws = new WebSocket(wsUrl());
         ws.onopen = function () {
           setWs(true);
-          appendLine("WebSocket 已连接，开始建立 CDP 会话并探测小游戏上下文");
+          appendLine("控制页 WebSocket 已连接，开始同步网关状态");
           send({ op: "ping" });
           renderInjectStatus();
-          if (lastHealth && lastHealth.cdp) {
+          if (lastHealth) {
             maybeAutoInjectFromHealth(lastHealth);
           }
           fetchHealth();
@@ -2100,6 +2516,58 @@
         loadAutoFarmState(false);
       };
 
+      document.getElementById("btnRuntimeRefresh").onclick = function () {
+        fetchHealth();
+      };
+
+      document.getElementById("btnPreviewRefresh").onclick = function () {
+        fetchHealth();
+        if (isPreviewSupported(lastHealth)) {
+          send({ op: "previewStatus" }, "previewStatus");
+        }
+      };
+
+      document.getElementById("btnSaveQqBundle").onclick = function () {
+        fetch("/api/qq-bundle?raw=1")
+          .then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            const disposition = r.headers.get("Content-Disposition") || "";
+            const match = disposition.match(/filename=\"?([^\";]+)\"?/i);
+            return Promise.all([r.text(), Promise.resolve(match ? match[1] : "qq-miniapp-bootstrap.js")]);
+          })
+          .then(function (pair) {
+            return saveTextWithDialog(pair[1], pair[0], "text/javascript").then(function (mode) {
+              appendLine("QQ Bundle 已导出", { filename: pair[1], mode: mode });
+            });
+          })
+          .catch(function (e) {
+            if (e && (e.name === "AbortError" || /aborted|cancelled|canceled/i.test(String(e.message || e)))) {
+              appendLine("已取消保存 QQ Bundle");
+              return;
+            }
+            appendLine("导出 QQ Bundle 失败", String(e));
+          });
+      };
+
+      document.getElementById("btnPatchQqGame").onclick = function () {
+        fetch("/api/qq-bundle/patch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (j) {
+            if (!(j && j.ok && j.data)) {
+              throw new Error(j && j.error ? j.error : "patch failed");
+            }
+            appendLine("QQ game.js 已打补丁", j.data);
+            fetchHealth();
+          })
+          .catch(function (e) {
+            appendLine("QQ game.js 打补丁失败", String(e));
+          });
+      };
+
       document.getElementById("btnClearLog").onclick = function () {
         logEl.innerHTML = "";
       };
@@ -2129,6 +2597,10 @@
 
       updateFriendMetrics(null);
       setWs(false);
+      renderRuntimeChip(null);
+      renderGameSideChip(null);
+      renderRuntimePanel(null);
+      renderPreviewCapability(null);
       renderInjectStatus();
       connect();
       fetchHealth();

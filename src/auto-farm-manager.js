@@ -39,15 +39,33 @@ function normalizeAutoFarmConfig(raw) {
 class AutoFarmManager {
   /**
    * @param {{
-   *   ensureCdp: () => Promise<any>,
-   *   getCdp: () => any,
+   *   ensureSession?: () => Promise<any>,
+   *   getSession?: () => any,
+   *   ensureGameCtl?: (session: any) => Promise<{ injected: boolean, state?: any }>,
+   *   callGameCtl?: (session: any, pathName: string, args: any[]) => Promise<any>,
+   *   getTransportState?: () => any,
+   *   ensureCdp?: () => Promise<any>,
+   *   getCdp?: () => any,
    *   projectRoot: string,
    * }} opts
    */
   constructor(opts) {
-    this.ensureCdp = opts.ensureCdp;
-    this.getCdp = opts.getCdp;
     this.projectRoot = opts.projectRoot;
+    this.ensureSession = typeof opts.ensureSession === "function"
+      ? opts.ensureSession
+      : opts.ensureCdp;
+    this.getSession = typeof opts.getSession === "function"
+      ? opts.getSession
+      : opts.getCdp;
+    this.getTransportState = typeof opts.getTransportState === "function"
+      ? opts.getTransportState
+      : () => null;
+    this.ensureGameCtlImpl = typeof opts.ensureGameCtl === "function"
+      ? opts.ensureGameCtl
+      : this._ensureGameCtlViaCdp.bind(this);
+    this.callGameCtlImpl = typeof opts.callGameCtl === "function"
+      ? opts.callGameCtl
+      : this._callGameCtlDirect.bind(this);
     this.timer = null;
     this.running = false;
     this.busy = false;
@@ -80,9 +98,7 @@ class AutoFarmManager {
       lastResult: this.lastResult,
       config: { ...this.config },
       recentEvents: [...this.recentEvents],
-      cdp: this.getCdp() && typeof this.getCdp().getStatusSnapshot === "function"
-        ? this.getCdp().getStatusSnapshot()
-        : null,
+      runtime: this.getTransportState(),
     };
   }
 
@@ -212,7 +228,7 @@ class AutoFarmManager {
     }
   }
 
-  async _ensureGameCtl(session) {
+  async _ensureGameCtlViaCdp(session) {
     return await ensureGameCtl(session, this.projectRoot, [
       "getFarmOwnership",
       "getFarmStatus",
@@ -220,10 +236,11 @@ class AutoFarmManager {
       "enterOwnFarm",
       "enterFriendFarm",
       "triggerOneClickOperation",
+      "autoPlant",
     ]);
   }
 
-  async _callGameCtl(session, pathName, args) {
+  async _callGameCtlDirect(session, pathName, args) {
     return await callGameCtl(session, pathName, args);
   }
 
@@ -241,11 +258,12 @@ class AutoFarmManager {
     if (due.friendDue) this.lastFriendRunAt = now;
 
     try {
-      const session = await this.ensureCdp();
-      const injectState = await this._ensureGameCtl(session);
+      const session = await this.ensureSession();
+      const injectState = await this.ensureGameCtlImpl(session);
       const cycleOpts = {
         ownFarmEnabled: due.ownDue,
         friendStealEnabled: due.friendDue,
+        autoPlantMode: this.config.autoFarmPlantMode || "none",
         enterWaitMs: this.config.autoFarmEnterWaitMs,
         actionWaitMs: this.config.autoFarmActionWaitMs,
         maxFriends: this.config.autoFarmMaxFriends,
@@ -255,7 +273,7 @@ class AutoFarmManager {
       };
       const result = await runAutoFarmCycle({
         session,
-        callGameCtl: this._callGameCtl.bind(this),
+        callGameCtl: this.callGameCtlImpl.bind(this),
         options: cycleOpts,
       });
       this.lastFinishedAt = new Date().toISOString();

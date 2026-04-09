@@ -104,22 +104,18 @@ class QqWsSession extends EventEmitter {
     });
   }
 
-  async ensureGameCtl(requiredMethods = []) {
+  async ensureGameCtl() {
     const describe = await this.call("host.describe", []);
-    const methods = {};
     const list = Array.isArray(describe && describe.availableMethods) ? describe.availableMethods : [];
     const gameCtlReady = !!(describe && describe.gameCtlReady);
-    for (const key of requiredMethods) {
-      methods[key] = list.includes("gameCtl." + key);
+    if (!gameCtlReady) {
+      throw new Error("qq ws runtime gameCtl not ready");
     }
-    const hasAllMethods = requiredMethods.every((key) => methods[key]);
-    if (!gameCtlReady || !hasAllMethods) {
-      const missing = requiredMethods.filter((key) => !methods[key]);
-      throw new Error(
-        !gameCtlReady
-          ? "qq ws runtime gameCtl not ready"
-          : `qq ws runtime missing methods: ${missing.join(", ")}`,
-      );
+    const methods = {};
+    for (let i = 0; i < list.length; i += 1) {
+      const pathName = String(list[i] || "");
+      if (pathName.indexOf("gameCtl.") !== 0) continue;
+      methods[pathName.slice("gameCtl.".length)] = true;
     }
     return {
       injected: false,

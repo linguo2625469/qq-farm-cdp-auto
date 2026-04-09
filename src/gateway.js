@@ -218,7 +218,7 @@ function createGateway(config) {
 
   async function ensureAutomationGameCtl(session) {
     if (isQqRuntimeSession(session)) {
-      return await qqWsSession.ensureGameCtl(REQUIRED_GAME_CTL_METHODS);
+      return await qqWsSession.ensureGameCtl();
     }
     return await ensureGameCtl(session, projectRoot, REQUIRED_GAME_CTL_METHODS);
   }

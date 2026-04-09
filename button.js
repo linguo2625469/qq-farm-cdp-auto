@@ -529,6 +529,56 @@
     return null;
   }
 
+  function findComponentByPredicate(node, predicate) {
+    const list = (node && node.components) || [];
+    for (let i = 0; i < list.length; i++) {
+      const comp = list[i];
+      const name = comp && comp.constructor ? comp.constructor.name : String(comp);
+      try {
+        if (predicate(comp, name)) return comp;
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  function isGridComponentLike(comp, name) {
+    if (!comp) return false;
+    if (name === 'l7' || name === 'LandComp') return true;
+
+    const hasLandApi = typeof comp.getLandId === 'function'
+      || typeof comp.getLandData === 'function'
+      || !!comp.landCellData;
+    const hasGridApi = typeof comp.getGridPosition === 'function'
+      || (typeof comp.gridX === 'number' && typeof comp.gridY === 'number');
+    const hasStateApi = typeof comp.getInteractable === 'function'
+      || typeof comp.getSelected === 'function'
+      || typeof comp.isInteractable === 'boolean'
+      || typeof comp.isSelected === 'boolean';
+
+    return !!(hasLandApi && hasGridApi && hasStateApi);
+  }
+
+  function isPlantComponentLike(comp, name) {
+    if (!comp) return false;
+    if (name === 'ln' || name === 'PlantComp') return true;
+
+    const hasPlantApi = typeof comp.getPlantData === 'function'
+      || typeof comp.hasPlantData === 'function'
+      || comp.plantData != null;
+    const hasGridApi = typeof comp.getGridPosition === 'function'
+      || (typeof comp.gridX === 'number' && typeof comp.gridY === 'number');
+
+    return !!(hasPlantApi && hasGridApi);
+  }
+
+  function findGridComponentOnNode(node) {
+    return findComponentByPredicate(node, isGridComponentLike);
+  }
+
+  function findPlantComponentOnNode(node) {
+    return findComponentByPredicate(node, isPlantComponentLike);
+  }
+
   function findFirstComponentByName(root, compName) {
     const nodes = walk(root);
     for (let i = 0; i < nodes.length; i++) {
@@ -2337,7 +2387,7 @@
     } else {
       const node = toNode(pathOrGridOrComp);
       if (node) {
-        const gridComp = findComponentByName(node, 'l7');
+        const gridComp = findGridComponentOnNode(node);
         if (gridComp && typeof gridComp.getLandId === 'function') {
           landId = gridComp.getLandId();
         }
@@ -2354,6 +2404,62 @@
     } catch (_) {
       return null;
     }
+  }
+
+  function readLandIdFromLandComp(landComp) {
+    if (!landComp) return null;
+
+    if (typeof landComp.getLandId === 'function') {
+      const directId = normalizeLandId(landComp.getLandId());
+      if (directId != null) return directId;
+    }
+
+    const landData = typeof landComp.getLandData === 'function'
+      ? landComp.getLandData()
+      : landComp.landCellData;
+    return normalizeLandId(landData && landData.id);
+  }
+
+  function resolveGridLandId(gridComp, node) {
+    const directId = readLandIdFromLandComp(gridComp);
+    if (directId != null) return directId;
+
+    const gridPos = gridComp && typeof gridComp.getGridPosition === 'function'
+      ? gridComp.getGridPosition()
+      : getGridCoords(node);
+    const gridX = gridPos && Number.isFinite(Number(gridPos.x)) ? Number(gridPos.x) : null;
+    const gridY = gridPos && Number.isFinite(Number(gridPos.y)) ? Number(gridPos.y) : null;
+    if (gridX == null || gridY == null) return null;
+
+    const farmEntity = getFarmEntity();
+    const farmMap = farmEntity && farmEntity.FarmMap ? farmEntity.FarmMap : null;
+    if (farmMap && typeof farmMap.getLandCompByGridPosition === 'function') {
+      try {
+        const landComp = farmMap.getLandCompByGridPosition(gridX, gridY);
+        const mapLandId = readLandIdFromLandComp(landComp);
+        if (mapLandId != null) return mapLandId;
+      } catch (_) {}
+    }
+
+    const farmModel = getFarmModel();
+    const landStore = farmModel && farmModel.land ? farmModel.land : null;
+    if (landStore && typeof landStore.getCell === 'function') {
+      try {
+        const landCell = landStore.getCell(gridX, gridY);
+        const modelLandId = normalizeLandId(landCell && landCell.id);
+        if (modelLandId != null) return modelLandId;
+      } catch (_) {}
+    }
+
+    if (farmModel && typeof farmModel.getLandByGrid === 'function') {
+      try {
+        const landCell = farmModel.getLandByGrid(gridX, gridY);
+        const modelLandId = normalizeLandId(landCell && landCell.id);
+        if (modelLandId != null) return modelLandId;
+      } catch (_) {}
+    }
+
+    return null;
   }
 
   function collectActionableLandIdsByGrid(root, farmType) {
@@ -2505,8 +2611,8 @@
     const node = toNode(pathOrNode);
     if (!node) throw new Error('Grid node not found: ' + pathOrNode);
 
-    const comp = findComponentByName(node, 'l7');
-    if (!comp) throw new Error('Grid controller (l7) not found: ' + fullPath(node));
+    const comp = findGridComponentOnNode(node);
+    if (!comp) throw new Error('Grid component not found: ' + fullPath(node));
     return comp;
   }
 
@@ -2514,8 +2620,8 @@
     const node = toNode(pathOrNode);
     if (!node) throw new Error('Plant node not found: ' + pathOrNode);
 
-    const comp = findComponentByName(node, 'ln');
-    if (!comp) throw new Error('Plant controller (ln) not found: ' + fullPath(node));
+    const comp = findPlantComponentOnNode(node);
+    if (!comp) throw new Error('Plant component not found: ' + fullPath(node));
     return comp;
   }
 
@@ -2591,11 +2697,11 @@
       const node = toNode(pathOrGridOrComp);
       if (!node) return null;
 
-      const gridComp = findComponentByName(node, 'l7');
+      const gridComp = findGridComponentOnNode(node);
       if (gridComp && typeof gridComp.checkHasPlant === 'function') {
         plant = gridComp.checkHasPlant();
       } else {
-        const plantComp = findComponentByName(node, 'ln');
+        const plantComp = findPlantComponentOnNode(node);
         if (plantComp) {
           plant = typeof plantComp.getPlantData === 'function'
             ? plantComp.getPlantData()
@@ -2675,7 +2781,7 @@
 
     const gridComp = getGridComponent(node);
     const plantRuntime = getPlantRuntime(gridComp);
-    const landId = typeof gridComp.getLandId === 'function' ? normalizeLandId(gridComp.getLandId()) : null;
+    const landId = resolveGridLandId(gridComp, node);
     const landRuntime = getLandRuntime(gridComp);
     const stage = getPlantStageSummary(plantRuntime);
     const plantNode = getPlantNodeByGrid(node);

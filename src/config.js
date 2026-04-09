@@ -13,6 +13,8 @@
  * FARM_QQ_WS_READY_TIMEOUT_MS  等待 QQ 宿主就绪超时，默认 15000ms
  * FARM_QQ_WS_CALL_TIMEOUT_MS   QQ 宿主单次 RPC 超时，默认 15000ms
  * FARM_QQ_GAME_JS       QQ 小程序 game.js 目标路径（用于一键打补丁）
+ * FARM_QQ_APPID         QQ 小程序 appid；未设置 QQ_GAME_JS 时可按 appid 自动查找最新 game.js
+ * FARM_QQ_MINIAPP_SRC_ROOT QQ miniapp_src 根目录；默认 %APPDATA%\\QQEX\\miniapp\\temps\\miniapp_src
  * FARM_QQ_HOST_WS_URL   生成 QQ 宿主 bundle 时写入的本地 WebSocket 地址
  * FARM_QQ_HOST_VERSION  QQ 宿主版本号，默认 qq-host-1
  * FARM_QQ_BUNDLE_OUT    生成 bundle 的默认输出路径
@@ -53,6 +55,8 @@ function getConfig() {
     qqWsReadyTimeoutMs: parseIntEnv("FARM_QQ_WS_READY_TIMEOUT_MS", 15_000),
     qqWsCallTimeoutMs: parseIntEnv("FARM_QQ_WS_CALL_TIMEOUT_MS", 15_000),
     qqGameJsPath: process.env.FARM_QQ_GAME_JS || "",
+    qqAppId: process.env.FARM_QQ_APPID || "",
+    qqMiniappSrcRoot: process.env.FARM_QQ_MINIAPP_SRC_ROOT || "",
     qqHostWsUrl: process.env.FARM_QQ_HOST_WS_URL || "",
     qqHostVersion: process.env.FARM_QQ_HOST_VERSION || "qq-host-1",
     qqBundleOutPath: process.env.FARM_QQ_BUNDLE_OUT || "",

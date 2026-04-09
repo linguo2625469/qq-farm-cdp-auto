@@ -39,8 +39,9 @@ npm run start -- --qq
 如果是 QQ 路线：
 
 1. 进入控制页“运行时”页签
-2. 点击“保存 QQ Bundle”导出 bundle，或点击“一键打补丁” 将bundlejs内容添加到小程序game.js尾部并保存
-3. 再启动 QQ 小程序
+2. 若已知 `appid`，直接填入页面里的 “QQ 小程序 AppID”
+3. 点击“保存 QQ Bundle”导出 bundle，或点击“一键打补丁” 自动查找最新 QQ 资源目录并把 bundle 写入 `game.js`
+4. 再启动 QQ 小程序
 
 ## 当前架构
 
@@ -140,6 +141,8 @@ FARM_ENV_FILE=.env.qq
 | `FARM_CDP_WS` | 微信 CDP 目标 |
 | `FARM_QQ_WS_PATH` | QQ 宿主 WebSocket 路径，默认 `/miniapp` |
 | `FARM_QQ_GAME_JS` | QQ 小程序 `game.js` 路径，用于一键打补丁 |
+| `FARM_QQ_APPID` | QQ 小程序 appid；未设置 `FARM_QQ_GAME_JS` 时按它自动定位最新版本目录 |
+| `FARM_QQ_MINIAPP_SRC_ROOT` | QQ `miniapp_src` 根目录；默认 `%APPDATA%\\QQEX\\miniapp\\temps\\miniapp_src` |
 | `FARM_QQ_HOST_WS_URL` | 生成 QQ bundle 时写入的本地宿主地址 |
 | `FARM_QQ_HOST_VERSION` | QQ 宿主版本号 |
 | `FARM_QQ_BUNDLE_OUT` | 命令行生成 bundle 的输出路径 |
@@ -153,7 +156,10 @@ FARM_GATEWAY_PORT=18788
 FARM_QQ_WS_PATH=/miniapp
 FARM_QQ_WS_READY_TIMEOUT_MS=15000
 FARM_QQ_WS_CALL_TIMEOUT_MS=15000
-FARM_QQ_GAME_JS=D:\path\to\qq-miniapp\game.js
+# 显式路径优先；不填时按 appid 自动扫描最新目录
+# FARM_QQ_GAME_JS=D:\path\to\qq-miniapp\game.js
+FARM_QQ_APPID=1112386029
+# FARM_QQ_MINIAPP_SRC_ROOT=C:\Users\RJ\AppData\Roaming\QQEX\miniapp\temps\miniapp_src
 FARM_QQ_HOST_WS_URL=ws://127.0.0.1:18788/miniapp
 FARM_QQ_HOST_VERSION=qq-host-1
 ```
@@ -171,8 +177,9 @@ FARM_QQ_HOST_VERSION=qq-host-1
 - `运行时`
   - 显示当前到底走 `微信 CDP` 还是 `QQ WS`
   - 显示 QQ 宿主最近日志
+  - 支持填写 `appid` 自动查找最新 QQ 小程序 `game.js`
   - 可直接“保存 QQ Bundle”
-  - 若已配置 `FARM_QQ_GAME_JS`，可直接“一键打补丁”
+  - 若已配置 `FARM_QQ_GAME_JS` 或 `FARM_QQ_APPID`，可直接“一键打补丁”
 - `画面预览`
   - 仅 CDP 路线可用
   - 仅支持点击
@@ -201,17 +208,23 @@ FARM_QQ_HOST_VERSION=qq-host-1
 
 ### 方式 2：网页一键打补丁
 
-前提：已经配置 `FARM_QQ_GAME_JS`
+前提：
+
+- 已配置 `FARM_QQ_GAME_JS`
+- 或已配置 `FARM_QQ_APPID`
+- 或在控制页里临时填写 `appid`
 
 1. `npm run start -- --qq`
 2. 打开控制页
 3. 进入“运行时”页签
-4. 点击“一键打补丁”
+4. 若未配置默认值，先填写 `QQ 小程序 AppID`
+5. 点击“一键打补丁”
 
 补丁行为：
 
 - 首次写入时会生成 `game.js.qq-farm.bak`
 - 重复执行会替换旧标记区块，不会无限追加
+- 若未显式配置 `FARM_QQ_GAME_JS`，会扫描 `%APPDATA%\\QQEX\\miniapp\\temps\\miniapp_src` 下 `appid_*` 目录，并选取最近更新的一份 `game.js`
 
 ### 方式 3：命令行生成 / 打补丁
 
@@ -227,6 +240,12 @@ npm run qq:bundle
 
 ```bash
 npm run qq:patch
+```
+
+也可以临时指定 appid：
+
+```bash
+npm run qq:patch -- --qq-appid 1112386029
 ```
 
 ## 微信路线使用方式
@@ -248,6 +267,7 @@ npm run qq:patch
 - QQ WebSocket 宿主链路
 - QQ bundle 生成
 - QQ `game.js` 一键打补丁
+- QQ `appid -> 最新版本目录 -> game.js` 自动发现
 - 自动农场调度：
   - 自己农场一键收获 / 浇水 / 除草 / 杀虫
   - 好友列表刷新、进入好友农场、一键偷菜

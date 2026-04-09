@@ -13,11 +13,14 @@ const {
   buildQqBundle,
   ensureParentDir,
   patchQqGameFile,
+  resolveQqPatchTarget,
 } = require(path.join(projectRoot, "src", "qq-bundle.js"));
 
 function parseArgs(argv) {
   const out = {
     target: "",
+    appId: "",
+    srcRoot: "",
     out: "",
     bundleOnly: false,
     noBackup: false,
@@ -32,6 +35,16 @@ function parseArgs(argv) {
     }
     if (arg === "--out" || arg === "-o") {
       out.out = String(argv[i + 1] || "");
+      i += 1;
+      continue;
+    }
+    if (arg === "--appid" || arg === "--qq-appid") {
+      out.appId = String(argv[i + 1] || "");
+      i += 1;
+      continue;
+    }
+    if (arg === "--qq-miniapp-src-root") {
+      out.srcRoot = String(argv[i + 1] || "");
       i += 1;
       continue;
     }
@@ -51,7 +64,6 @@ function parseArgs(argv) {
 function main() {
   const config = getConfig();
   const args = parseArgs(process.argv.slice(2));
-  const targetPath = args.target || config.qqGameJsPath || "";
   const outPath = path.resolve(args.out || config.qqBundleOutPath || path.join(projectRoot, "dist", "qq-miniapp-bootstrap.js"));
   const built = buildQqBundle({
     config,
@@ -63,15 +75,31 @@ function main() {
   fs.writeFileSync(outPath, bundleText, "utf8");
   console.log(`[qq-patch] bootstrap bundle written: ${outPath}`);
 
-  if (args.bundleOnly || !targetPath) {
-    if (!targetPath) {
+  const target = resolveQqPatchTarget({
+    targetPath: args.target,
+    appId: args.appId,
+    fallbackTargetPath: config.qqGameJsPath,
+    fallbackAppId: config.qqAppId,
+    srcRoot: args.srcRoot || config.qqMiniappSrcRoot,
+  });
+
+  if (args.bundleOnly || !target.targetPath) {
+    if (!target.targetPath) {
       console.log("[qq-patch] no target game.js configured; bundle-only mode");
-      console.log("[qq-patch] set FARM_QQ_GAME_JS or use --target <path> to patch automatically");
+      if (target.targetError) {
+        console.log(`[qq-patch] ${target.targetError}`);
+      } else {
+        console.log("[qq-patch] set FARM_QQ_GAME_JS / FARM_QQ_APPID or use --target / --qq-appid to patch automatically");
+      }
     }
     return;
   }
 
-  const result = patchQqGameFile(targetPath, bundleText, { noBackup: args.noBackup });
+  if (target.targetMode === "auto") {
+    console.log(`[qq-patch] resolved appid ${target.appId} -> ${target.targetPath}`);
+  }
+
+  const result = patchQqGameFile(target.targetPath, bundleText, { noBackup: args.noBackup });
   console.log(`[qq-patch] patched target: ${result.targetPath}`);
   console.log(`[qq-patch] mode: ${result.replacedExistingBlock ? "replace" : "append"}`);
   if (!args.noBackup) {

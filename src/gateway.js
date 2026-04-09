@@ -19,7 +19,7 @@ const { AutoFarmManager } = require("./auto-farm-manager");
 const { PreviewManager } = require("./preview-manager");
 const { QqWsSession } = require("./qq-ws-session");
 const { ensureGameCtl, callGameCtl } = require("./game-ctl-utils");
-const { buildQqBundle, getQqBundleState, patchQqGameFile } = require("./qq-bundle");
+const { buildQqBundle, getQqBundleState, patchQqGameFile, resolveQqPatchTarget } = require("./qq-bundle");
 const { QQ_RPC_GAME_CTL_METHODS } = require("./qq-rpc-spec");
 
 const WS_PATH = "/ws";
@@ -80,6 +80,10 @@ async function readJsonBody(req) {
     throw new Error("invalid body");
   }
   return parsed;
+}
+
+function parseRequestUrl(req) {
+  return new URL(req.url || "/", "http://127.0.0.1");
 }
 
 /**
@@ -862,18 +866,47 @@ function createGateway(config) {
       return;
     }
 
+    if (req.method === "GET" && urlPath === "/api/qq-miniapp/find") {
+      try {
+        const requestUrl = parseRequestUrl(req);
+        const target = resolveQqPatchTarget({
+          targetPath: requestUrl.searchParams.get("targetPath"),
+          appId: requestUrl.searchParams.get("appid"),
+          fallbackTargetPath: config.qqGameJsPath,
+          fallbackAppId: config.qqAppId,
+          srcRoot: requestUrl.searchParams.get("srcRoot") || config.qqMiniappSrcRoot,
+        });
+        if (!target.targetPath) {
+          throw new Error(target.targetError || "未找到可用的 QQ game.js");
+        }
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, data: target }));
+      } catch (e) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+      return;
+    }
+
     if (req.method === "POST" && urlPath === "/api/qq-bundle/patch") {
       try {
         const parsed = await readJsonBody(req);
-        const targetPath = String(parsed.targetPath || config.qqGameJsPath || "").trim();
-        if (!targetPath) {
-          throw new Error("未配置 QQ game.js 路径，请先设置 FARM_QQ_GAME_JS");
+        const target = resolveQqPatchTarget({
+          targetPath: parsed.targetPath,
+          appId: parsed.appId,
+          fallbackTargetPath: config.qqGameJsPath,
+          fallbackAppId: config.qqAppId,
+          srcRoot: parsed.srcRoot || config.qqMiniappSrcRoot,
+        });
+        if (!target.targetPath) {
+          throw new Error(target.targetError || "未配置 QQ game.js 路径，也未提供 QQ appid");
         }
         const built = buildQqBundle({
           config,
           projectRoot,
         });
-        const patch = patchQqGameFile(targetPath, built.bundleText, {
+        const patch = patchQqGameFile(target.targetPath, built.bundleText, {
           noBackup: !!parsed.noBackup,
         });
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
@@ -881,6 +914,7 @@ function createGateway(config) {
           ok: true,
           data: {
             meta: built.meta,
+            target,
             patch,
           },
         }));

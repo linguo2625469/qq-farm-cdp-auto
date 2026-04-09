@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { QQ_RPC_ALLOWED_PATHS } = require("./qq-rpc-spec");
+const { findLatestQqMiniappByAppId } = require("./qq-miniapp-discovery");
 
 const MARKER_START = "// >>> QQ_FARM_AUTOMATION START >>>";
 const MARKER_END = "// <<< QQ_FARM_AUTOMATION END <<<";
@@ -19,6 +20,10 @@ function escapeDoubleQuotedString(value) {
 
 function sha1Hex(source) {
   return crypto.createHash("sha1").update(source, "utf8").digest("hex");
+}
+
+function trimToString(value) {
+  return String(value == null ? "" : value).trim();
 }
 
 function normalizeWsUrl(rawUrl, config) {
@@ -38,15 +43,96 @@ function renderHostSource(hostTemplate, replacements) {
   return text;
 }
 
+function resolveQqPatchTarget(options = {}) {
+  const explicitTargetPath = trimToString(options.targetPath);
+  const explicitAppId = trimToString(options.appId);
+  const fallbackTargetPath = explicitTargetPath ? "" : trimToString(options.fallbackTargetPath);
+  const fallbackAppId = explicitTargetPath || explicitAppId ? "" : trimToString(options.fallbackAppId);
+  const srcRoot = trimToString(options.srcRoot);
+
+  const resolvedTargetPath = explicitTargetPath || (!explicitAppId ? fallbackTargetPath : "");
+  const resolvedAppId = explicitAppId || (!resolvedTargetPath ? fallbackAppId : "");
+
+  if (resolvedTargetPath) {
+    const absoluteTarget = path.resolve(resolvedTargetPath);
+    if (!fs.existsSync(absoluteTarget)) {
+      return {
+        appId: resolvedAppId || null,
+        targetMode: "explicit",
+        targetPath: null,
+        targetResolvable: false,
+        targetError: `目标 game.js 不存在: ${absoluteTarget}`,
+        discovery: null,
+      };
+    }
+    return {
+      appId: resolvedAppId || null,
+      targetMode: "explicit",
+      targetPath: absoluteTarget,
+      targetResolvable: true,
+      targetError: null,
+      discovery: null,
+    };
+  }
+
+  if (resolvedAppId) {
+    try {
+      const discovery = findLatestQqMiniappByAppId({
+        appId: resolvedAppId,
+        srcRoot: srcRoot || undefined,
+      });
+      return {
+        appId: discovery.appId,
+        targetMode: "auto",
+        targetPath: discovery.selected.gameJsPath,
+        targetResolvable: true,
+        targetError: null,
+        discovery,
+      };
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      return {
+        appId: resolvedAppId,
+        targetMode: "auto",
+        targetPath: null,
+        targetResolvable: false,
+        targetError: err.message,
+        discovery: null,
+      };
+    }
+  }
+
+  return {
+    appId: null,
+    targetMode: null,
+    targetPath: null,
+    targetResolvable: false,
+    targetError: null,
+    discovery: null,
+  };
+}
+
 function getQqBundleState(config) {
   const outputPath = config.qqBundleOutPath || path.join(path.join(__dirname, ".."), "dist", DEFAULT_QQ_BUNDLE_FILENAME);
+  const target = resolveQqPatchTarget({
+    targetPath: config.qqGameJsPath,
+    appId: config.qqAppId,
+    srcRoot: config.qqMiniappSrcRoot,
+  });
   return {
     defaultFilename: DEFAULT_QQ_BUNDLE_FILENAME,
     outputPath,
     hostWsUrl: normalizeWsUrl(config.qqHostWsUrl, config),
     hostVersion: config.qqHostVersion || "qq-host-1",
-    targetConfigured: !!config.qqGameJsPath,
-    targetPath: config.qqGameJsPath || null,
+    configuredTargetPath: config.qqGameJsPath || null,
+    appId: config.qqAppId || null,
+    miniappSrcRoot: config.qqMiniappSrcRoot || null,
+    targetConfigured: !!config.qqGameJsPath || !!config.qqAppId,
+    targetMode: target.targetMode,
+    targetPath: target.targetPath,
+    canPatch: !!target.targetResolvable,
+    targetError: target.targetError,
+    discovery: target.discovery,
   };
 }
 
@@ -144,6 +230,11 @@ ${hostSource}
       outputPath: state.outputPath,
       targetConfigured: state.targetConfigured,
       targetPath: state.targetPath,
+      targetMode: state.targetMode,
+      canPatch: state.canPatch,
+      targetError: state.targetError,
+      appId: state.appId,
+      discovery: state.discovery,
     },
   };
 }
@@ -193,4 +284,5 @@ module.exports = {
   ensureParentDir,
   getQqBundleState,
   patchQqGameFile,
+  resolveQqPatchTarget,
 };

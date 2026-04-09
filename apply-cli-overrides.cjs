@@ -48,6 +48,8 @@ function applyCliOverrides(argv) {
   applyIfPresent("FARM_GATEWAY_HOST", readOption(args, "--gateway-host"));
   applyIfPresent("FARM_CDP_WS", readOption(args, "--cdp-ws"));
   applyIfPresent("FARM_QQ_GAME_JS", readOption(args, "--qq-game-js"));
+  applyIfPresent("FARM_QQ_APPID", readOption(args, "--qq-appid"));
+  applyIfPresent("FARM_QQ_MINIAPP_SRC_ROOT", readOption(args, "--qq-miniapp-src-root"));
   applyIfPresent("FARM_QQ_HOST_WS_URL", readOption(args, "--qq-host-ws-url"));
   applyIfPresent("FARM_QQ_HOST_VERSION", readOption(args, "--qq-host-version"));
 }

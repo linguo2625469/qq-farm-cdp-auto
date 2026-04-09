@@ -807,7 +807,15 @@
           </div>
           <p class="summary-note" id="txtQqHostState">未连接</p>
           <p class="summary-note" id="txtQqBundleState">等待 bundle 配置</p>
+          <div class="input-grid single">
+            <label class="field-block">
+              <span>QQ 小程序 AppID</span>
+              <input type="text" id="iptQqAppId" placeholder="例如 1112386029" inputmode="numeric" />
+            </label>
+          </div>
+          <p class="summary-note" id="txtQqTargetState">填写 AppID 后可自动查找最新 QQ 小程序 game.js</p>
           <div class="action-row">
+            <button type="button" class="ghost" id="btnFindQqGame">查找最新版本</button>
             <button type="button" class="action secondary" id="btnSaveQqBundle">保存 QQ Bundle</button>
             <button type="button" class="action" id="btnPatchQqGame">一键打补丁</button>
           </div>
@@ -1041,6 +1049,8 @@
     (function () {
       const WS_PATH = "/ws";
       const LS_CFG_CACHE = "farm-cdp-farm-config-cache";
+      const LS_QQ_APPID = "farm-cdp-qq-appid";
+      const DEFAULT_QQ_APPID = "1112386029";
       const HEALTH_POLL_MS = 2500;
       const AUTO_FARM_POLL_MS = 5000;
 
@@ -1061,7 +1071,9 @@
       const txtRuntimeSummary = document.getElementById("txtRuntimeSummary");
       const txtQqHostState = document.getElementById("txtQqHostState");
       const txtQqBundleState = document.getElementById("txtQqBundleState");
+      const txtQqTargetState = document.getElementById("txtQqTargetState");
       const logQqHost = document.getElementById("logQqHost");
+      const iptQqAppId = document.getElementById("iptQqAppId");
       const txtCdpState = document.getElementById("txtCdpState");
       const txtInjectState = document.getElementById("txtInjectState");
       const txtRuntimeNotes = document.getElementById("txtRuntimeNotes");
@@ -1092,6 +1104,7 @@
       let previewPointer = null;
       let lastHealth = null;
       let debugMode = false;
+      let qqLookupState = null;
       const DATA_TRUNCATE_LEN = 200;
       const pendingTags = new Map();
       const autoInject = {
@@ -1103,6 +1116,13 @@
         lastError: "",
         lastOkAt: "",
       };
+
+      try {
+        const cachedQqAppId = localStorage.getItem(LS_QQ_APPID);
+        if (iptQqAppId) {
+          iptQqAppId.value = cachedQqAppId || DEFAULT_QQ_APPID;
+        }
+      } catch (_) {}
 
       function formatClock(dateLike) {
         const date = dateLike ? new Date(dateLike) : new Date();
@@ -1150,6 +1170,172 @@
 
       function getQqBundleState(payload) {
         return payload && payload.qqBundle && typeof payload.qqBundle === "object" ? payload.qqBundle : null;
+      }
+
+      function normalizeText(value) {
+        return String(value == null ? "" : value).trim();
+      }
+
+      function isQqAppId(value) {
+        return /^\d+$/.test(String(value || ""));
+      }
+
+      function getQqAppIdValue() {
+        return normalizeText(iptQqAppId ? iptQqAppId.value : "");
+      }
+
+      function persistQqAppId() {
+        try {
+          const appId = getQqAppIdValue();
+          if (appId) localStorage.setItem(LS_QQ_APPID, appId);
+          else localStorage.removeItem(LS_QQ_APPID);
+        } catch (_) {}
+      }
+
+      function shortenMiddle(text, head, tail) {
+        const value = String(text || "");
+        if (!value) return "";
+        const keepHead = head == null ? 34 : head;
+        const keepTail = tail == null ? 42 : tail;
+        if (value.length <= keepHead + keepTail + 5) return value;
+        return value.slice(0, keepHead) + " ... " + value.slice(-keepTail);
+      }
+
+      function getEffectiveQqTarget(bundle) {
+        const inputAppId = getQqAppIdValue();
+        if (inputAppId && qqLookupState && qqLookupState.appId === inputAppId) {
+          return qqLookupState;
+        }
+        if (!bundle) return null;
+        if (inputAppId && bundle.appId && bundle.appId !== inputAppId) {
+          return null;
+        }
+        if (!bundle.targetMode && !bundle.targetPath && !bundle.targetError && !bundle.appId) {
+          return null;
+        }
+        return {
+          appId: bundle.appId || "",
+          ok: !!bundle.canPatch,
+          error: bundle.targetError || null,
+          data: {
+            appId: bundle.appId || null,
+            targetMode: bundle.targetMode || null,
+            targetPath: bundle.targetPath || null,
+            discovery: bundle.discovery || null,
+          },
+        };
+      }
+
+      function maybeSeedQqAppIdFromBundle(bundle) {
+        if (!iptQqAppId || !bundle || !bundle.appId) return;
+        if (getQqAppIdValue()) return;
+        iptQqAppId.value = String(bundle.appId);
+        persistQqAppId();
+      }
+
+      function renderQqTargetState(bundle) {
+        if (!txtQqTargetState) return;
+        const appId = getQqAppIdValue();
+        if (appId && !isQqAppId(appId)) {
+          txtQqTargetState.textContent = "AppID 需为纯数字，例如 1112386029";
+          return;
+        }
+
+        const targetState = getEffectiveQqTarget(bundle);
+        if (targetState && targetState.data && targetState.data.targetPath) {
+          const data = targetState.data;
+          if (data.discovery && data.discovery.selected) {
+            const selected = data.discovery.selected;
+            const parts = [
+              "appid " + (data.appId || targetState.appId || appId || "unknown"),
+              "目录 " + (selected.versionDirName || "unknown"),
+              "目标 " + shortenMiddle(data.targetPath || selected.gameJsPath),
+            ];
+            if (selected.lastTouchedAt) {
+              parts.push("更新 " + formatDateTime(selected.lastTouchedAt));
+            }
+            txtQqTargetState.textContent = parts.join(" · ");
+            return;
+          }
+          txtQqTargetState.textContent = "显式路径: " + shortenMiddle(data.targetPath);
+          return;
+        }
+
+        const error = targetState && targetState.error ? targetState.error : "";
+        if (error) {
+          txtQqTargetState.textContent = "目标定位失败: " + error;
+          return;
+        }
+
+        if (appId) {
+          txtQqTargetState.textContent = "appid " + appId + " 尚未定位，可点击“查找最新版本”或直接“一键打补丁”";
+          return;
+        }
+
+        if (bundle && bundle.appId) {
+          txtQqTargetState.textContent = "已配置默认 appid " + bundle.appId + "，将自动扫描最新版本目录";
+          return;
+        }
+
+        txtQqTargetState.textContent = "填写 AppID 后可自动查找最新 QQ 小程序 game.js";
+      }
+
+      function findQqGameTarget(options) {
+        const opts = options || {};
+        const appId = getQqAppIdValue();
+        persistQqAppId();
+
+        if (!appId) {
+          qqLookupState = null;
+          renderQqTargetState(getQqBundleState(lastHealth));
+          return Promise.resolve(null);
+        }
+
+        if (!isQqAppId(appId)) {
+          qqLookupState = {
+            appId: appId,
+            ok: false,
+            data: null,
+            error: "AppID 必须是纯数字",
+          };
+          renderQqTargetState(getQqBundleState(lastHealth));
+          if (!opts.silent) appendLine("QQ AppID 格式不正确", appId);
+          return Promise.resolve(null);
+        }
+
+        if (!opts.force && qqLookupState && qqLookupState.ok && qqLookupState.appId === appId) {
+          renderQqTargetState(getQqBundleState(lastHealth));
+          return Promise.resolve(qqLookupState.data);
+        }
+
+        return fetch("/api/qq-miniapp/find?appid=" + encodeURIComponent(appId))
+          .then(function (r) { return r.json(); })
+          .then(function (j) {
+            if (!(j && j.ok && j.data)) {
+              throw new Error(j && j.error ? j.error : "lookup failed");
+            }
+            qqLookupState = {
+              appId: appId,
+              ok: true,
+              data: j.data,
+              error: null,
+            };
+            renderQqTargetState(getQqBundleState(lastHealth));
+            if (!opts.silent) appendLine("已定位 QQ game.js", j.data);
+            return j.data;
+          })
+          .catch(function (e) {
+            const err = String(e && e.message ? e.message : e);
+            qqLookupState = {
+              appId: appId,
+              ok: false,
+              data: null,
+              error: err,
+            };
+            renderQqTargetState(getQqBundleState(lastHealth));
+            if (!opts.silent) appendLine("查找 QQ game.js 失败", err);
+            throw e;
+          });
       }
 
       function appendLine(msg, obj, isDebug) {
@@ -2144,6 +2330,7 @@
           txtRuntimeSummary.textContent = "健康检查失败，等待下次轮询";
           txtQqHostState.textContent = "未连接";
           txtQqBundleState.textContent = "无法读取 bundle 配置";
+          renderQqTargetState(null);
           const btnPatch0 = document.getElementById("btnPatchQqGame");
           if (btnPatch0) btnPatch0.disabled = true;
           logQqHost.textContent = "暂无宿主日志";
@@ -2190,26 +2377,35 @@
         logQqHost.textContent = qqLines.length ? qqLines.join("\n") : "暂无宿主日志";
 
         const bundle = getQqBundleState(payload);
+        maybeSeedQqAppIdFromBundle(bundle);
         if (bundle) {
           const bundleParts = [
             "文件 " + (bundle.defaultFilename || "qq-miniapp-bootstrap.js"),
             "ws " + (bundle.hostWsUrl || "未设置"),
             "版本 " + (bundle.hostVersion || "qq-host-1"),
           ];
-          if (bundle.targetConfigured && bundle.targetPath) {
+          if (bundle.appId) {
+            bundleParts.push("appid " + bundle.appId);
+          }
+          if (bundle.canPatch && bundle.targetPath) {
             bundleParts.push("可直接补丁");
+          } else if (bundle.targetConfigured) {
+            bundleParts.push("已配置自动定位");
           } else {
-            bundleParts.push("未配置目标 game.js");
+            bundleParts.push("未配置目标");
           }
           txtQqBundleState.textContent = bundleParts.join(" · ");
         } else {
           txtQqBundleState.textContent = "等待 bundle 配置";
         }
+        renderQqTargetState(bundle);
 
         const btnPatch = document.getElementById("btnPatchQqGame");
         if (btnPatch) {
-          btnPatch.disabled = !(bundle && bundle.targetConfigured);
-          btnPatch.title = btnPatch.disabled ? "先配置 FARM_QQ_GAME_JS，再使用一键打补丁" : "";
+          const appId = getQqAppIdValue();
+          const canPatch = !!(bundle && bundle.canPatch) || (appId && isQqAppId(appId));
+          btnPatch.disabled = !canPatch;
+          btnPatch.title = btnPatch.disabled ? "填写 AppID 或配置默认目标后再使用一键打补丁" : "";
         }
 
         const cdp = payload.cdp || null;
@@ -2518,6 +2714,7 @@
 
       document.getElementById("btnRuntimeRefresh").onclick = function () {
         fetchHealth();
+        findQqGameTarget({ silent: true, force: true }).catch(function () {});
       };
 
       document.getElementById("btnPreviewRefresh").onclick = function () {
@@ -2549,11 +2746,20 @@
           });
       };
 
+      document.getElementById("btnFindQqGame").onclick = function () {
+        findQqGameTarget({ force: true }).catch(function () {});
+      };
+
       document.getElementById("btnPatchQqGame").onclick = function () {
+        const appId = getQqAppIdValue();
+        const body = {};
+        if (appId && isQqAppId(appId)) {
+          body.appId = appId;
+        }
         fetch("/api/qq-bundle/patch", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
+          body: JSON.stringify(body),
         })
           .then(function (r) { return r.json(); })
           .then(function (j) {
@@ -2561,12 +2767,35 @@
               throw new Error(j && j.error ? j.error : "patch failed");
             }
             appendLine("QQ game.js 已打补丁", j.data);
+            if (j.data && j.data.target && j.data.target.appId) {
+              qqLookupState = {
+                appId: j.data.target.appId,
+                ok: true,
+                data: j.data.target,
+                error: null,
+              };
+            }
             fetchHealth();
           })
           .catch(function (e) {
             appendLine("QQ game.js 打补丁失败", String(e));
           });
       };
+
+      if (iptQqAppId) {
+        iptQqAppId.addEventListener("change", function () {
+          qqLookupState = null;
+          persistQqAppId();
+          renderQqTargetState(getQqBundleState(lastHealth));
+          findQqGameTarget({ silent: true, force: true }).catch(function () {});
+        });
+        iptQqAppId.addEventListener("keydown", function (e) {
+          if (e.key !== "Enter") return;
+          e.preventDefault();
+          qqLookupState = null;
+          findQqGameTarget({ force: true }).catch(function () {});
+        });
+      }
 
       document.getElementById("btnClearLog").onclick = function () {
         logEl.innerHTML = "";
@@ -2602,6 +2831,9 @@
       renderRuntimePanel(null);
       renderPreviewCapability(null);
       renderInjectStatus();
+      if (getQqAppIdValue()) {
+        findQqGameTarget({ silent: true }).catch(function () {});
+      }
       connect();
       fetchHealth();
       setInterval(fetchHealth, HEALTH_POLL_MS);

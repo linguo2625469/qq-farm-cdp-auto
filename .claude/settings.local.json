@@ -6,7 +6,9 @@
       "Bash(node -c src/auto-farm-manager.js)",
       "Bash(node run.cjs --help)",
       "Bash(timeout 3 node run.cjs --wx)",
-      "Bash(timeout 3 node run.cjs --qq)"
+      "Bash(timeout 3 node run.cjs --qq)",
+      "Bash(node -c src/qq-bundle.js)",
+      "Bash(node:*)"
     ]
   }
 }

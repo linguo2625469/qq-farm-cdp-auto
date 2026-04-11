@@ -31,6 +31,14 @@
   .preview-stage {
     min-height: min(58vh, 640px);
   }
+
+  .support-card {
+    grid-template-columns: 1fr;
+  }
+
+  .support-qr {
+    justify-self: start;
+  }
 }
 
 @media (max-width: 640px) {
@@ -67,5 +75,19 @@
   pre.log.side,
   pre.log.full {
     min-height: 320px;
+  }
+
+  .support-card {
+    padding: 18px;
+  }
+
+  .support-qr {
+    width: min(100%, 240px);
+    justify-self: center;
+  }
+
+  .support-tags span {
+    width: 100%;
+    justify-content: center;
   }
 }

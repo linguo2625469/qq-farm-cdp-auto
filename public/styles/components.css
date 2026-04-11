@@ -386,3 +386,116 @@ pre.log.full {
   border-color: rgba(181, 75, 57, 0.28);
   background: linear-gradient(135deg, rgba(255, 243, 239, 0.98), rgba(255, 250, 242, 0.98));
 }
+
+.support-section {
+  margin-top: 18px;
+}
+
+.support-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) 232px;
+  gap: 20px;
+  align-items: center;
+  padding: 24px;
+  border-radius: var(--radius-xl);
+  border: 1px solid rgba(79, 138, 60, 0.14);
+  background:
+    radial-gradient(circle at top right, rgba(255, 232, 182, 0.58), transparent 28%),
+    radial-gradient(circle at bottom left, rgba(79, 138, 60, 0.16), transparent 24%),
+    linear-gradient(135deg, rgba(255, 252, 246, 0.96), rgba(245, 234, 215, 0.92));
+  box-shadow: 0 18px 40px rgba(89, 67, 41, 0.12);
+  overflow: hidden;
+}
+
+.support-card::after {
+  content: "";
+  position: absolute;
+  right: -52px;
+  bottom: -56px;
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(138, 91, 50, 0.12), rgba(138, 91, 50, 0));
+  pointer-events: none;
+}
+
+.support-copy {
+  position: relative;
+  z-index: 1;
+}
+
+.support-copy h2 {
+  margin: 0;
+  font-size: clamp(1.3rem, 2vw, 1.75rem);
+  line-height: 1.28;
+}
+
+.support-text {
+  margin: 0.95rem 0 0;
+  max-width: 42rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.75;
+}
+
+.support-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 1rem;
+}
+
+.support-tags span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0.45rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid rgba(109, 81, 50, 0.12);
+  background: rgba(255, 252, 247, 0.8);
+  color: var(--soil);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.support-qr {
+  position: relative;
+  z-index: 1;
+  justify-self: end;
+  display: grid;
+  gap: 10px;
+  width: 232px;
+  padding: 16px;
+  border-radius: 22px;
+  border: 1px solid rgba(109, 81, 50, 0.16);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 16px 34px rgba(69, 52, 31, 0.12);
+  text-decoration: none;
+  color: inherit;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.support-qr:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 40px rgba(69, 52, 31, 0.16);
+}
+
+.support-qr img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 16px;
+  border: 1px solid rgba(109, 81, 50, 0.08);
+  background: #fff;
+}
+
+.support-qr-tip {
+  display: block;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
